@@ -37,8 +37,11 @@ Each target scores 10 points for every 60 px/s of speed, rounded up:
 | Middle | 120 px/s | 20     |
 | Bottom | 60 px/s  | 10     |
 
-Shots fly at 700 px/s, so a shot reaches the bottom rail in about a quarter
-of a second and the top rail in about half a second.
+Shots fly at 700 px/s. Fired straight up, a shot reaches the bottom rail in
+about a quarter of a second and the top rail in about half a second. An angled
+shot spends part of that speed going sideways, so it takes longer to climb to
+each rail and needs more lead on a moving target. A wide enough angle leaves
+the side of the screen before it reaches the top rail.
 
 Your final score is saved to the carnival's score board when the game ends.
 
