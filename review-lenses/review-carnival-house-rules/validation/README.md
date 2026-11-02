@@ -90,8 +90,10 @@ candidate concerns at all (`results/negative.json`).
 
 ### Backtest: two historical diffs
 
-These are the two commits since the lens arrived that change a game. The
-expectations come from reading each diff before the review ran:
+These were the only two commits that changed a game between the lens's arrival
+(4961195) and the run (d24e110). Whack-a-mole (#12) merged after the run, and
+is not in the backtest. The expectations come from reading each diff before
+the review ran:
 
 - **fb8f125** (#4, Water Cannon shots and rewards). Every colour the diff adds
   is `colors.accent`, `colors.danger`, `colors.water`, `colors.surface` or
