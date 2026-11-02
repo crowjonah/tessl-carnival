@@ -35,6 +35,21 @@ and never pushed, so no fixture registers a booth here. For a commit, it reviews
 `<commit>~1..<commit>`. The output goes to `results/<case>.json`. A new run
 replaces those files. Run `npm run format` afterwards, which only re-indents the JSON, and compare with `git diff results/`.
 
+`run.sh` replaces a case's results only once its review has completed: the
+output is JSON with `status` `"ok"`, a boolean `outcome.approved` and an
+`outcome.findings` list, and the command exited 0, or non-zero with `approved`
+false (a review that reports findings). Missing, malformed or error output,
+or an approval with a non-zero exit, leaves the saved results as they were
+and stops the run with exit 1. A fixture whose `npm run check` fails stops
+the run before its review, so no credits go on it.
+
+`run.test.sh` checks those paths with stub `tessl` and `npm` commands in a
+scratch repository, so it spends no review credits:
+
+```sh
+review-lenses/review-carnival-house-rules/validation/run.test.sh
+```
+
 ## Results
 
 | Case       | Expected                                | Actual                                 | Match |
