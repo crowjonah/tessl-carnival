@@ -1,0 +1,112 @@
+{
+  "status": "ok",
+  "outcome": {
+    "schemaVersion": 3,
+    "runId": "73739a00-12c9-457b-b246-15e046ab0c9a",
+    "subject": {
+      "schemaVersion": 1,
+      "repository": "https://github.com/crowjonah/tessl-carnival.git",
+      "change": {
+        "baseRevision": "d24e110426f3b7e3e2a298978b7db7ae92f73e8f",
+        "headRevision": "c2bedd6da730bd79cc4c06348496fd487d39ea09",
+        "headKind": "commit",
+        "mergeBaseRevision": "d24e110426f3b7e3e2a298978b7db7ae92f73e8f"
+      }
+    },
+    "profileName": "standard",
+    "model": "gpt-6.1-sol",
+    "reviewMode": "standard",
+    "effort": "medium",
+    "lenses": [
+      {
+        "ref": "/workspace/repo/review-lenses/review-carnival-house-rules/SKILL.md",
+        "effort": "medium"
+      }
+    ],
+    "judgement": "The new game’s logic tests cover scoring and timer expiry, but not its browser integration. The runtime records completed scores repeatedly, bypasses shared storage safeguards for its best score, and uses drawing styles outside the carnival theme.",
+    "approved": false,
+    "findings": [
+      {
+        "id": "crf-af77b891ec16e996",
+        "title": "A completed round is recorded on every subsequent animation frame",
+        "body": "In src/games/lens-check/game.ts:65–74, timer expiry leaves the state in `over`, and every subsequent frame calls `recordScore` again until restart or exit. The shared scoreboard appends entries without deduplication and retains only 50 per game, so a single completed round can fill the retained history with duplicates and displace lower-scoring rounds. This violates house rule 2 and corrupts the recorded results. Score reporting must occur exactly once per completed round while still allowing subsequent rounds to report.",
+        "severity": "major",
+        "likelihood": "high",
+        "confidence": "high",
+        "relationship": "introduced",
+        "location": {
+          "path": "src/games/lens-check/game.ts",
+          "line": 67,
+          "side": "RIGHT"
+        },
+        "evidence": [
+          "/workspace/repo/review-lenses/review-carnival-house-rules/SKILL.md @ src/games/lens-check/game.ts:67"
+        ],
+        "lensRefs": ["/workspace/repo/review-lenses/review-carnival-house-rules/SKILL.md"],
+        "disposition": "new",
+        "requiresChanges": true
+      },
+      {
+        "id": "crf-0c634add5c3b0a26",
+        "title": "Private best-score storage bypasses the shared module’s failure handling",
+        "body": "The direct `localStorage` read at src/games/lens-check/game.ts:52 and write at line 70 are unguarded. If storage access is blocked, startup throws; if a write is refused when a new best is achieved, `recordScore` can successfully fall back to memory, but the private write then throws before drawing or scheduling another frame, freezing the game. The separate best-score source can also disagree with the shared board after that failed write. House rule 2 requires score persistence and best-score state to use the shared scores module rather than game-owned storage, preserving its failure handling.",
+        "severity": "major",
+        "likelihood": "medium",
+        "confidence": "high",
+        "relationship": "introduced",
+        "location": {
+          "path": "src/games/lens-check/game.ts",
+          "line": 52,
+          "side": "RIGHT"
+        },
+        "evidence": [
+          "/workspace/repo/review-lenses/review-carnival-house-rules/SKILL.md @ src/games/lens-check/game.ts:52"
+        ],
+        "lensRefs": ["/workspace/repo/review-lenses/review-carnival-house-rules/SKILL.md"],
+        "disposition": "new",
+        "requiresChanges": true
+      },
+      {
+        "id": "crf-81b768596f3174fa",
+        "title": "The game’s palette and typography bypass the carnival theme",
+        "body": "The drawing code at src/games/lens-check/game.ts:32–35 uses `'#102030'`, `'hotpink'`, and `'bold 20px Arial'` instead of shared theme values. Consequently, its background and score display do not match the carnival’s palette and typography, violating house rule 3. These styles need to derive from shared roles such as `theme.colors.background`, `theme.colors.text` or `accent`, and `canvasFont` with a shared font size. The theme has no exact 20px size; retaining that private font literal would not satisfy the rule.",
+        "severity": "nit",
+        "likelihood": "high",
+        "confidence": "high",
+        "relationship": "introduced",
+        "location": {
+          "path": "src/games/lens-check/game.ts",
+          "line": 35,
+          "side": "RIGHT"
+        },
+        "evidence": [
+          "/workspace/repo/review-lenses/review-carnival-house-rules/SKILL.md @ src/games/lens-check/game.ts:35"
+        ],
+        "lensRefs": ["/workspace/repo/review-lenses/review-carnival-house-rules/SKILL.md"],
+        "disposition": "new",
+        "requiresChanges": false
+      }
+    ],
+    "policySummary": {
+      "candidates": 3,
+      "assessed": 3,
+      "dropped": 0,
+      "surfaced": 3,
+      "blocking": 2,
+      "droppedByReason": {
+        "lowConfidence": 0,
+        "preExisting": 0,
+        "unclearRelationship": 0,
+        "belowThreshold": 0
+      }
+    },
+    "reconciliation": []
+  },
+  "diagnostics": {
+    "durationMs": 98502
+  },
+  "organization": {
+    "id": "01a19d0c-b090-7264-ad0f-5bcd0b4a2195",
+    "name": "crowjonah"
+  }
+}

@@ -1,0 +1,12 @@
+> tessl-carnival@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.12 /tmp/tmp.1YOgOwxnts/tree
+
+
+ Test Files  9 passed (9)
+      Tests  63 passed (63)
+   Start at  17:32:34
+   Duration  501ms (transform 191ms, setup 0ms, import 292ms, tests 107ms, environment 1ms)
+

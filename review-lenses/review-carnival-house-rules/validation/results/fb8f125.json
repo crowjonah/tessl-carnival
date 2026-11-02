@@ -1,0 +1,62 @@
+{
+  "status": "ok",
+  "outcome": {
+    "schemaVersion": 3,
+    "runId": "3fe6f4b1-b6f7-4072-b165-37bbc4963521",
+    "subject": {
+      "schemaVersion": 1,
+      "repository": "https://github.com/crowjonah/tessl-carnival.git",
+      "change": {
+        "baseRevision": "4961195339cca85f9f3457e5a33c2c349fb01719",
+        "headRevision": "fb8f125fd407db0116a8005c4921714cabb48f1e",
+        "headKind": "commit",
+        "mergeBaseRevision": "4961195339cca85f9f3457e5a33c2c349fb01719"
+      }
+    },
+    "profileName": "standard",
+    "model": "gpt-6.1-sol",
+    "reviewMode": "standard",
+    "effort": "medium",
+    "lenses": [
+      {
+        "ref": "/workspace/repo/review-lenses/review-carnival-house-rules/SKILL.md",
+        "effort": "medium"
+      }
+    ],
+    "judgement": "The change updates Water Cannon gameplay feedback, tests, and documentation. No candidate concerns or earlier actionable findings were supplied for reconciliation, so no findings are surfaced.",
+    "approved": true,
+    "findings": [],
+    "policySummary": {
+      "candidates": 0,
+      "assessed": 0,
+      "dropped": 0,
+      "surfaced": 0,
+      "blocking": 0,
+      "droppedByReason": {
+        "lowConfidence": 0,
+        "preExisting": 0,
+        "unclearRelationship": 0,
+        "belowThreshold": 0
+      }
+    },
+    "reconciliation": []
+  },
+  "diagnostics": {
+    "durationMs": 31059
+  },
+  "preparationDiagnostics": [
+    {
+      "level": "warning",
+      "code": "uncommitted-changes-excluded",
+      "message": "Uncommitted changes are excluded because --head selected committed ref \"fb8f125\". Including them requires reviewing the current checkout instead, which may select different committed code.",
+      "correctiveCommand": {
+        "route": "code.review.run",
+        "args": ["--base", "fb8f125~1"]
+      }
+    }
+  ],
+  "organization": {
+    "id": "01a19d0c-b090-7264-ad0f-5bcd0b4a2195",
+    "name": "crowjonah"
+  }
+}
