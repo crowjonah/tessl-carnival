@@ -1,0 +1,22 @@
+{
+  "name": "tessl-carnival",
+  "mode": "vendored",
+  "dependencies": {
+    "tessl-labs/factory-setup": {
+      "version": "0.24.0"
+    }
+  },
+  "agents": ["copilot-vscode"],
+  "schedules": {
+    "doc-gardening": {
+      "cron": "0 6 * * 1",
+      "description": "Find documentation and agent instructions that no longer match the carnival code and file GitHub issues.",
+      "action": {
+        "skill": "file:tessl-factory#doc-gardening",
+        "environment": "factory-crowjonah-tessl-carnival-implement",
+        "agent": "claude-code",
+        "model": "claude-sonnet-4-6"
+      }
+    }
+  }
+}
