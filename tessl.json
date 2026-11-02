@@ -4,14 +4,9 @@
   "dependencies": {
     "tessl-labs/factory-setup": {
       "version": "0.24.0"
-    },
-    "tessl-labs/factory": {
-      "version": "0.7.2"
     }
   },
-  "agents": [
-    "copilot-vscode"
-  ],
+  "agents": ["copilot-vscode"],
   "schedules": {
     "doc-gardening": {
       "cron": "0 6 * * 1",

@@ -149,7 +149,3 @@ You often work on an issue with nobody around to answer questions.
 `WORKSHOP.md` starts the workshop this repo was built for, and sends people down
 one of two paths: `workshop/agent.md` or `workshop/browser.md`. Each has a core
 path everyone finishes, then optional tracks.
-
-# Agent Rules <!-- tessl-managed -->
-
-@.tessl/RULES.md follow the [instructions](.tessl/RULES.md)
