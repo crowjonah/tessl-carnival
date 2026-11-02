@@ -5,7 +5,11 @@ const { width: WIDTH, height: HEIGHT } = theme.canvas;
 export const TANK_SIZE = 15;
 export const SHOT_SPEED = 700;
 export const CANNON = { x: WIDTH / 2, y: HEIGHT - 30 } as const;
-const RAILS = [
+/** The tank counts as low, and the gauge turns red, at this many shots or fewer. */
+export const LOW_WATER = 5;
+/** How long a splash and its points stay on screen, in seconds. */
+export const SPLASH_TIME = 0.8;
+export const RAILS = [
   { y: 110, speed: 180, radius: 22 },
   { y: 200, speed: -120, radius: 28 },
   { y: 290, speed: 60, radius: 34 },
@@ -27,9 +31,12 @@ export interface Shot {
   vy: number;
 }
 
+/** Marks the target a shot soaked, so the player can see which one took it. */
 export interface Splash {
   x: number;
   y: number;
+  radius: number;
+  points: number;
   age: number;
 }
 
@@ -56,8 +63,12 @@ export function createState(): WaterCannonState {
 }
 
 /** Faster targets are worth more: 10 points per 60 px/s, rounded up. */
-export function scoreForHit(target: Target): number {
+export function scoreForHit(target: Pick<Target, 'speed'>): number {
   return 10 * Math.ceil(Math.abs(target.speed) / 60);
+}
+
+export function isLowWater(state: WaterCannonState): boolean {
+  return state.tank <= LOW_WATER;
 }
 
 export function isHit(shot: Shot, target: Target): boolean {
@@ -94,8 +105,9 @@ export function step(state: WaterCannonState, dt: number): void {
     shot.y += shot.vy * dt;
     const target = state.targets.find((t) => isHit(shot, t));
     if (target) {
-      state.score += scoreForHit(target);
-      state.splashes.push({ x: target.x, y: target.y, age: 0 });
+      const points = scoreForHit(target);
+      state.score += points;
+      state.splashes.push({ x: target.x, y: target.y, radius: target.radius, points, age: 0 });
       // Send the soaked target back to the start of its rail.
       target.x = target.speed > 0 ? -target.radius : WIDTH + target.radius;
     } else if (shot.y > -10 && shot.x > -10 && shot.x < WIDTH + 10) {
@@ -105,7 +117,7 @@ export function step(state: WaterCannonState, dt: number): void {
   state.shots = remaining;
 
   for (const splash of state.splashes) splash.age += dt;
-  state.splashes = state.splashes.filter((s) => s.age < 0.4);
+  state.splashes = state.splashes.filter((s) => s.age < SPLASH_TIME);
 
   if (state.tank === 0 && state.shots.length === 0) state.phase = 'over';
 }
@@ -127,9 +139,13 @@ function draw(
     ctx.fillRect(i * stripe, 0, stripe, 40);
   }
 
+  ctx.font = canvasFont('small', 'bold');
+  ctx.textAlign = 'left';
   for (const rail of RAILS) {
     ctx.fillStyle = colors.wood;
     ctx.fillRect(0, rail.y + rail.radius + 4, WIDTH, 6);
+    ctx.fillStyle = colors.accent;
+    ctx.fillText(`${scoreForHit(rail)} pts`, 8, rail.y + rail.radius + 26);
   }
 
   for (const target of state.targets) {
@@ -154,13 +170,36 @@ function draw(
     ctx.fill();
   }
 
-  ctx.strokeStyle = colors.water;
-  ctx.lineWidth = 3;
+  // Each splash traces the shot back to the cannon and rings the target that
+  // took it, so a shot blocked by a nearer target is easy to read.
+  ctx.font = canvasFont('body', 'bold');
+  ctx.textAlign = 'center';
   for (const splash of state.splashes) {
-    ctx.globalAlpha = 1 - splash.age / 0.4;
+    const fade = 1 - splash.age / SPLASH_TIME;
+    ctx.globalAlpha = fade * 0.5;
+    ctx.strokeStyle = colors.water;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 6]);
+    ctx.beginPath();
+    ctx.moveTo(CANNON.x, CANNON.y);
+    ctx.lineTo(splash.x, splash.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.globalAlpha = fade;
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = colors.accent;
+    ctx.beginPath();
+    ctx.arc(splash.x, splash.y, splash.radius + 4, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = colors.water;
     ctx.beginPath();
     ctx.arc(splash.x, splash.y, 10 + splash.age * 90, 0, Math.PI * 2);
     ctx.stroke();
+
+    ctx.fillStyle = colors.accent;
+    ctx.fillText(`+${splash.points}`, splash.x, splash.y - splash.radius - 10 - splash.age * 30);
   }
   ctx.globalAlpha = 1;
 
@@ -181,8 +220,7 @@ function draw(
   ctx.font = canvasFont('body', 'bold');
   ctx.textAlign = 'left';
   ctx.fillText(`Score ${state.score}`, 16, HEIGHT - 20);
-  ctx.textAlign = 'right';
-  ctx.fillText(`Water ${state.tank}/${TANK_SIZE}`, WIDTH - 16, HEIGHT - 20);
+  drawTank(ctx, state);
 
   if (state.phase === 'over') {
     ctx.fillStyle = colors.background;
@@ -196,6 +234,29 @@ function draw(
     ctx.fillStyle = colors.text;
     ctx.font = canvasFont('body');
     ctx.fillText('Click to play again', WIDTH / 2, HEIGHT / 2 + 40);
+  }
+}
+
+/** The tank gauge: one pip per shot, turning red with a warning when low. */
+function drawTank(ctx: CanvasRenderingContext2D, state: WaterCannonState) {
+  const { colors } = theme;
+  const low = isLowWater(state);
+  const pip = 8;
+  const gap = 3;
+  const right = WIDTH - 16;
+  const top = HEIGHT - 52;
+
+  ctx.textAlign = 'right';
+  ctx.font = canvasFont('body', 'bold');
+  ctx.fillStyle = low ? colors.danger : colors.text;
+  const label = state.tank === 0 ? 'Tank empty!' : low ? 'Low water!' : 'Water';
+  ctx.fillText(`${label} ${state.tank}/${TANK_SIZE}`, right, HEIGHT - 20);
+
+  for (let i = 0; i < TANK_SIZE; i++) {
+    const x = right - (TANK_SIZE - i) * (pip + gap) + gap;
+    const full = i < state.tank;
+    ctx.fillStyle = full ? (low ? colors.danger : colors.water) : colors.surface;
+    ctx.fillRect(x, top, pip, 14);
   }
 }
 

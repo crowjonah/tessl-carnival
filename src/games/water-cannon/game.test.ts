@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   CANNON,
+  LOW_WATER,
+  RAILS,
   TANK_SIZE,
   createState,
   fire,
   isHit,
+  isLowWater,
   scoreForHit,
   step,
   type Target,
@@ -76,5 +79,30 @@ describe('water cannon', () => {
     const slow = scoreForHit({ ...target, speed: 60 });
     const fast = scoreForHit({ ...target, speed: -180 });
     expect(Math.max(fast, slow)).toBeGreaterThanOrEqual(slow);
+  });
+
+  it('shows each rail as worth 30, 20 and 10 points from top to bottom', () => {
+    expect(RAILS.map((rail) => scoreForHit(rail))).toEqual([30, 20, 10]);
+  });
+
+  it('marks the tank as low only once it reaches the low water mark', () => {
+    const state = createState();
+    expect(isLowWater(state)).toBe(false);
+    state.tank = LOW_WATER + 1;
+    expect(isLowWater(state)).toBe(false);
+    state.tank = LOW_WATER;
+    expect(isLowWater(state)).toBe(true);
+  });
+
+  it('marks the target that took a shot, with the points it scored', () => {
+    const state = createState();
+    const near = { ...target, y: 290, radius: 34, speed: 60 };
+    const far = { ...target, y: 110, radius: 22, speed: 180 };
+    state.targets = [far, near];
+    state.shots = [{ x: near.x, y: near.y + 5, vx: 0, vy: 0 }];
+    const hitAt = { x: near.x, y: near.y };
+    step(state, 0);
+    expect(state.splashes).toEqual([{ ...hitAt, radius: near.radius, points: 10, age: 0 }]);
+    expect(state.score).toBe(10);
   });
 });
