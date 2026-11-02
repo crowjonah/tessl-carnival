@@ -8,6 +8,16 @@ Soak the targets on the three rails before your tank runs dry.
 - You have 15 shots. The game ends when the tank is empty and the last shot has landed.
 - Click again on the game over screen to play another round.
 
+## Reading the booth
+
+- The gauge in the bottom right has one pip per shot left. When 5 or fewer
+  remain, the gauge and its label turn red and say "Low water!".
+- Each rail shows its point value at its left end.
+- A shot stops at the first target it touches, so a nearer target can block a
+  shot at a farther one. When a shot lands, a dashed line runs from the cannon
+  to the target that took it, that target gets a gold ring, and the points it
+  scored float above it.
+
 ## Scoring
 
 Each target scores 10 points for every 60 px/s of speed, rounded up:
