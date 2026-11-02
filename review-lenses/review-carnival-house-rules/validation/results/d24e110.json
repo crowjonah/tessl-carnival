@@ -1,0 +1,62 @@
+{
+  "status": "ok",
+  "outcome": {
+    "schemaVersion": 3,
+    "runId": "5767ed4c-df9a-41b3-95da-e72f1d8e6789",
+    "subject": {
+      "schemaVersion": 1,
+      "repository": "https://github.com/crowjonah/tessl-carnival.git",
+      "change": {
+        "baseRevision": "ceedee5298a2a81c18083798dcea103c6e63d7db",
+        "headRevision": "d24e110426f3b7e3e2a298978b7db7ae92f73e8f",
+        "headKind": "commit",
+        "mergeBaseRevision": "ceedee5298a2a81c18083798dcea103c6e63d7db"
+      }
+    },
+    "profileName": "standard",
+    "model": "gpt-6.1-sol",
+    "reviewMode": "standard",
+    "effort": "medium",
+    "lenses": [
+      {
+        "ref": "/workspace/repo/review-lenses/review-carnival-house-rules/SKILL.md",
+        "effort": "medium"
+      }
+    ],
+    "judgement": "The change adds a Ring Toss game with aiming sway, distance-based scoring, round restart and score recording, plus documentation and logic tests. No candidate concerns or earlier findings were supplied for reconciliation; no findings are surfaced.",
+    "approved": true,
+    "findings": [],
+    "policySummary": {
+      "candidates": 0,
+      "assessed": 0,
+      "dropped": 0,
+      "surfaced": 0,
+      "blocking": 0,
+      "droppedByReason": {
+        "lowConfidence": 0,
+        "preExisting": 0,
+        "unclearRelationship": 0,
+        "belowThreshold": 0
+      }
+    },
+    "reconciliation": []
+  },
+  "diagnostics": {
+    "durationMs": 40414
+  },
+  "preparationDiagnostics": [
+    {
+      "level": "warning",
+      "code": "uncommitted-changes-excluded",
+      "message": "Uncommitted changes are excluded because --head selected committed ref \"d24e110\". Including them requires reviewing the current checkout instead, which may select different committed code.",
+      "correctiveCommand": {
+        "route": "code.review.run",
+        "args": ["--base", "d24e110~1"]
+      }
+    }
+  ],
+  "organization": {
+    "id": "01a19d0c-b090-7264-ad0f-5bcd0b4a2195",
+    "name": "crowjonah"
+  }
+}

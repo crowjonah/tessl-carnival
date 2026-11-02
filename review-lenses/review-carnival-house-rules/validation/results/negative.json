@@ -1,0 +1,51 @@
+{
+  "status": "ok",
+  "outcome": {
+    "schemaVersion": 3,
+    "runId": "5ee54ebb-daa9-4694-a5e7-897d14d8b3ab",
+    "subject": {
+      "schemaVersion": 1,
+      "repository": "https://github.com/crowjonah/tessl-carnival.git",
+      "change": {
+        "baseRevision": "d24e110426f3b7e3e2a298978b7db7ae92f73e8f",
+        "headRevision": "b75e30f1233e8f1c23cfad57d806a403798466cb",
+        "headKind": "commit",
+        "mergeBaseRevision": "d24e110426f3b7e3e2a298978b7db7ae92f73e8f"
+      }
+    },
+    "profileName": "standard",
+    "model": "gpt-6.1-sol",
+    "reviewMode": "standard",
+    "effort": "medium",
+    "lenses": [
+      {
+        "ref": "/workspace/repo/review-lenses/review-carnival-house-rules/SKILL.md",
+        "effort": "medium"
+      }
+    ],
+    "judgement": "The change adds a theme-derived Lens Check game and tests for scoring and round expiration. No candidate concerns or earlier findings were provided for reconciliation; no findings are surfaced.",
+    "approved": true,
+    "findings": [],
+    "policySummary": {
+      "candidates": 0,
+      "assessed": 0,
+      "dropped": 0,
+      "surfaced": 0,
+      "blocking": 0,
+      "droppedByReason": {
+        "lowConfidence": 0,
+        "preExisting": 0,
+        "unclearRelationship": 0,
+        "belowThreshold": 0
+      }
+    },
+    "reconciliation": []
+  },
+  "diagnostics": {
+    "durationMs": 39575
+  },
+  "organization": {
+    "id": "01a19d0c-b090-7264-ad0f-5bcd0b4a2195",
+    "name": "crowjonah"
+  }
+}
