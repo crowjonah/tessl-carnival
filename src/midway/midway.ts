@@ -313,7 +313,7 @@ export function startMidway(canvas: HTMLCanvasElement, options: MidwayOptions): 
     if (destination && player.path.length > 0) {
       const p = toScreen(Math.floor(destination.x) + 0.5, Math.floor(destination.y) + 0.5);
       const pulse = 1 + Math.sin(t * 6) * 0.15;
-      ctx.strokeStyle = palette.gold;
+      ctx.strokeStyle = palette.blue;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.ellipse(p.x, p.y, 10 * pulse, 5 * pulse, 0, 0, Math.PI * 2);

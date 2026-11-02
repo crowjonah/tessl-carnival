@@ -1,6 +1,7 @@
 import { canvasFont, theme } from '../carnival';
 import bannerUrl from './aidevcon-banner.png';
 import { palette } from './palette';
+import { contours, elevation, hillsFor, type Contour } from './terrain';
 import {
   CART_KINDS,
   toScreen,
@@ -206,7 +207,7 @@ function signBoard(
   ctx.roundRect(-width / 2, -height / 2, width, height, 3);
   ctx.fill();
   if (glow) {
-    ctx.strokeStyle = palette.gold;
+    ctx.strokeStyle = palette.blue;
     ctx.lineWidth = 2;
     ctx.stroke();
   }
@@ -275,8 +276,8 @@ export interface GroundLayer {
 }
 
 /**
- * Draws the parts of the ground that never change (the grass, paths, trees
- * and the hedge's back two sides) once, onto an off-screen canvas covering
+ * Draws the parts of the ground that never change (the grass, contour lines,
+ * paths, trees and the hedge's back two sides) once, onto an off-screen canvas covering
  * groundBounds(map). It uses `scale` device pixels per world pixel, or less
  * when that would make the canvas too big, so its size stays bounded however
  * long the midway grows.
@@ -291,25 +292,14 @@ export function drawGroundLayer(map: MidwayMap, wanted: number): GroundLayer {
   const ctx = canvas.getContext('2d')!;
   ctx.setTransform(scale, 0, 0, scale, -bounds.left * scale, -bounds.top * scale);
 
-  // Lighter plots of grass inside the hedge, raised a little above the paths.
+  // Lighter plots of grass inside the hedge, with contour lines over them.
   poly(ctx, rectPoints({ x: 0, y: 0, w: map.width, h: map.height }), palette.grassLight);
-  for (const path of map.paths) poly(ctx, rectPoints(path, 3), palette.grassEdge);
-  for (const path of map.paths) poly(ctx, rectPoints(path), palette.path);
+  drawContours(ctx, map);
 
-  // Tufts of grass.
-  ctx.strokeStyle = palette.grassDark;
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  for (let y = 1; y < map.height - 1; y++) {
-    for (let x = 1; x < map.width - 1; x++) {
-      if (map.ground[y * map.width + x] !== 'grass' || hash(x, y) > 0.5) continue;
-      const [px, py] = at(x + hash(x, y, 1), y + hash(x, y, 2));
-      ctx.moveTo(px - 2, py - 2);
-      ctx.lineTo(px, py);
-      ctx.lineTo(px + 2, py - 3);
-    }
-  }
-  ctx.stroke();
+  // Paths in a grey casing, like roads on a map, with the avenue named.
+  for (const path of map.paths) poly(ctx, rectPoints(grow(path, 0.08)), palette.pathCasing);
+  for (const path of map.paths) poly(ctx, rectPoints(path), palette.path);
+  pathName(ctx, map);
 
   // Trees out in the field behind the midway.
   for (let i = 0; i < map.width; i += 2) tree(ctx, i + 0.5 + hash(i, 1) * 0.6, -1.4 - hash(i, 2));
@@ -318,6 +308,53 @@ export function drawGroundLayer(map: MidwayMap, wanted: number): GroundLayer {
   hedge(ctx, { x: 0, y: 0, w: map.width, h: 1 });
   hedge(ctx, { x: 0, y: 0, w: 1, h: map.height });
   return { canvas, scale };
+}
+
+function grow(r: Rect, by: number): Rect {
+  return { x: r.x - by, y: r.y - by, w: r.w + by * 2, h: r.h + by * 2 };
+}
+
+/** Contour lines, computed once per map, since the terrain never changes. */
+const contourCache = new WeakMap<MidwayMap, Contour[]>();
+
+function drawContours(ctx: Ctx, map: MidwayMap) {
+  let lines = contourCache.get(map);
+  if (!lines) {
+    const hills = hillsFor(map.width, map.height);
+    lines = contours((x, y) => elevation(hills, x, y, 0.12), map.width, map.height);
+    contourCache.set(map, lines);
+  }
+  ctx.lineCap = 'round';
+  for (const { level, segments } of lines) {
+    // Every fifth line is an index contour, drawn heavier, as on a survey map.
+    const index = level % 5 === 0;
+    ctx.strokeStyle = index ? palette.contourIndex : palette.contour;
+    ctx.lineWidth = index ? 1.2 : 0.7;
+    ctx.beginPath();
+    for (const [x1, y1, x2, y2] of segments) {
+      const a = at(x1, y1);
+      const b = at(x2, y2);
+      ctx.moveTo(a[0], a[1]);
+      ctx.lineTo(b[0], b[1]);
+    }
+    ctx.stroke();
+  }
+}
+
+/** "MIDWAY" lettered along the avenue, lying flat on the ground. */
+function pathName(ctx: Ctx, map: MidwayMap) {
+  const centre = at(map.avenueX + 1, map.height / 2 + 1);
+  ctx.save();
+  // Local x runs north up the avenue, local y across it.
+  ctx.transform(0.894, -0.447, 0.894, 0.447, centre[0], centre[1]);
+  ctx.font = `600 7px ${theme.font.family}`;
+  ctx.letterSpacing = '3px';
+  ctx.fillStyle = palette.contourLabel;
+  ctx.globalAlpha = 0.7;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('MIDWAY', 0, 0);
+  ctx.restore();
 }
 
 function tree(ctx: Ctx, x: number, y: number) {
@@ -1528,7 +1565,7 @@ function booth(ctx: Ctx, slot: BoothSlot, name: string, t: number, glow: boolean
       60,
       16,
       open
-        ? { board: palette.cream, edge: palette.red, text: palette.red }
+        ? { board: palette.cream, edge: palette.blue, text: palette.ink }
         : { board: palette.metal, edge: palette.closedShade, text: palette.closedShade },
       glow,
     );
@@ -1668,9 +1705,9 @@ export function drawArch(ctx: Ctx, map: MidwayMap, t: number) {
     ctx.ellipse(0, -10, 12, 9, 0, Math.PI, Math.PI * 2);
     ctx.fill();
     signBoard(ctx, "CROW'S CARNIVAL", 92, 20, {
-      board: palette.wood,
-      edge: palette.woodDark,
-      text: palette.gold,
+      board: palette.cream,
+      edge: palette.blue,
+      text: palette.blue,
     });
     for (let i = 0; i < 14; i++) {
       ctx.fillStyle = Math.sin(t * 5 - i * 0.8) > 0 ? palette.cream : palette.goldShade;
@@ -1787,9 +1824,9 @@ export function label(ctx: Ctx, text: string, x: number, y: number) {
   ctx.font = canvasFont('small', 'bold');
   const width = ctx.measureText(text).width + 22;
   const height = theme.font.small + 14;
-  ctx.fillStyle = colors.background;
-  ctx.strokeStyle = colors.accent;
-  ctx.lineWidth = 2;
+  ctx.fillStyle = colors.foreground;
+  ctx.strokeStyle = colors.brand;
+  ctx.lineWidth = 1.5;
   ctx.beginPath();
   ctx.roundRect(x - width / 2, y - height / 2, width, height, Math.min(radius, height / 2));
   ctx.fill();
@@ -1800,7 +1837,7 @@ export function label(ctx: Ctx, text: string, x: number, y: number) {
   ctx.lineTo(x, y + height / 2 + 7);
   ctx.closePath();
   ctx.fill();
-  ctx.fillStyle = colors.accent;
+  ctx.fillStyle = colors.text;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(text, x, y + 1);
