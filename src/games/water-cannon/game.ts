@@ -9,6 +9,8 @@ export const CANNON = { x: WIDTH / 2, y: HEIGHT - 30 } as const;
 export const LOW_WATER = 5;
 /** How long a splash and its points stay on screen, in seconds. */
 export const SPLASH_TIME = 0.8;
+/** Length of the aim guide from the cannon. It stops short of the nearest rail. */
+export const AIM_GUIDE_LENGTH = 110;
 export const RAILS = [
   { y: 110, speed: 180, radius: 22 },
   { y: 200, speed: -120, radius: 28 },
@@ -75,17 +77,38 @@ export function isHit(shot: Shot, target: Target): boolean {
   return Math.hypot(shot.x - target.x, shot.y - target.y) <= target.radius;
 }
 
-/** Fires one shot of water towards the aim point. Returns false if nothing fired. */
-export function fire(state: WaterCannonState, aimX: number, aimY: number): boolean {
-  if (state.phase !== 'playing' || state.tank === 0) return false;
+/**
+ * The unit direction a shot takes towards the aim point. Aiming below the
+ * cannon still fires upwards, so a shot never goes down.
+ */
+export function aimDirection(aimX: number, aimY: number): { x: number; y: number } {
   const dx = aimX - CANNON.x;
   const dy = Math.min(aimY - CANNON.y, -1);
   const length = Math.hypot(dx, dy);
+  return { x: dx / length, y: dy / length };
+}
+
+/**
+ * The aim guide: a short line from the cannon along the firing direction. It
+ * ends before the nearest rail, so it shows direction without promising a hit.
+ */
+export function aimGuide(aimX: number, aimY: number) {
+  const dir = aimDirection(aimX, aimY);
+  return {
+    from: { x: CANNON.x, y: CANNON.y },
+    to: { x: CANNON.x + dir.x * AIM_GUIDE_LENGTH, y: CANNON.y + dir.y * AIM_GUIDE_LENGTH },
+  };
+}
+
+/** Fires one shot of water towards the aim point. Returns false if nothing fired. */
+export function fire(state: WaterCannonState, aimX: number, aimY: number): boolean {
+  if (state.phase !== 'playing' || state.tank === 0) return false;
+  const dir = aimDirection(aimX, aimY);
   state.shots.push({
     x: CANNON.x,
     y: CANNON.y,
-    vx: (dx / length) * SHOT_SPEED,
-    vy: (dy / length) * SHOT_SPEED,
+    vx: dir.x * SHOT_SPEED,
+    vy: dir.y * SHOT_SPEED,
   });
   state.tank -= 1;
   return true;
@@ -93,6 +116,11 @@ export function fire(state: WaterCannonState, aimX: number, aimY: number): boole
 
 /** Advances the game by `dt` seconds. */
 export function step(state: WaterCannonState, dt: number): void {
+  // Age splashes before this step's hits, so a new splash gets the full
+  // SPLASH_TIME on screen.
+  for (const splash of state.splashes) splash.age += dt;
+  state.splashes = state.splashes.filter((s) => s.age < SPLASH_TIME);
+
   for (const target of state.targets) {
     target.x += target.speed * dt;
     if (target.x > WIDTH + target.radius) target.x = -target.radius;
@@ -116,10 +144,11 @@ export function step(state: WaterCannonState, dt: number): void {
   }
   state.shots = remaining;
 
-  for (const splash of state.splashes) splash.age += dt;
-  state.splashes = state.splashes.filter((s) => s.age < SPLASH_TIME);
-
-  if (state.tank === 0 && state.shots.length === 0) state.phase = 'over';
+  // The round ends once the last shot has landed and its splash has faded,
+  // so the final score never covers the last hit.
+  if (state.tank === 0 && state.shots.length === 0 && state.splashes.length === 0) {
+    state.phase = 'over';
+  }
 }
 
 function draw(
@@ -203,8 +232,24 @@ function draw(
   }
   ctx.globalAlpha = 1;
 
-  // Cannon, pointing at the aim.
-  const angle = Math.atan2(Math.min(aim.y - CANNON.y, -1), aim.x - CANNON.x);
+  // Aim guide, while there is water to fire.
+  if (state.phase === 'playing' && state.tank > 0) {
+    const guide = aimGuide(aim.x, aim.y);
+    ctx.globalAlpha = 0.6;
+    ctx.strokeStyle = colors.water;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 8]);
+    ctx.beginPath();
+    ctx.moveTo(guide.from.x, guide.from.y);
+    ctx.lineTo(guide.to.x, guide.to.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+  }
+
+  // Cannon, pointing the way it fires.
+  const dir = aimDirection(aim.x, aim.y);
+  const angle = Math.atan2(dir.y, dir.x);
   ctx.save();
   ctx.translate(CANNON.x, CANNON.y);
   ctx.rotate(angle);
