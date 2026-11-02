@@ -13,10 +13,24 @@ export const palette = {
   skyHigh: '#d9edf2',
   cloud: colors.foreground,
   cloudShade: '#cfe7ee',
-  haze: '#e3efec',
 
-  /** The field round the midway: pale green paper. */
-  grass: '#e4efe2',
+  /**
+   * The island's cross-section, from the topsoil down to the bedrock, in
+   * tints of the same three inks, so the underground stays part of the print.
+   */
+  strata: ['#5e8f63', '#f6d9cd', '#cfe6ee', '#e1eee0', '#a9d3e0', '#f1c0ae', '#6aa7bf'],
+  /** The ruled line between two strata. */
+  strataLine: 'rgba(22, 35, 42, 0.4)',
+  /** The cyan wash over the face turned away from the light. */
+  faceShade: 'rgba(0, 77, 107, 0.18)',
+  /** Roots in section, and the pale hollows the buried relics lie in. */
+  root: '#4e3220',
+  rootLight: '#a8774f',
+  hollow: 'rgba(255, 255, 255, 0.7)',
+  /** The Water Cannon's buried main, and the water in its cistern. */
+  pipe: colors.brandPress,
+  pipeLight: colors.stripeB,
+  water: colors.water,
   /** Terrace tops, from the lowest step to the highest, in green-ink tints. */
   terraces: ['#eef5ea', '#dcebd5', '#c8e0c0', '#b2d3ab', '#9cc597', '#86b683', '#6fa671'],
   /** Riser faces under each terrace's front edge. */

@@ -1,3 +1,5 @@
+import { lipTrees } from './cutaway';
+import { cameraBounds, cameraTarget, zoomFor } from './framing';
 import { palette } from './palette';
 import {
   archBounds,
@@ -9,13 +11,14 @@ import {
   drawCloud,
   drawFloaters,
   drawFrontHedge,
-  drawField,
   drawGroundLayer,
+  drawLipTree,
   drawProp,
   drawWalker,
   groundBounds,
   HORIZON,
   label,
+  lipTreeBounds,
   PLAYER_LOOK,
   propBounds,
   visitorLook,
@@ -97,6 +100,8 @@ export function startMidway(canvas: HTMLCanvasElement, options: MidwayOptions): 
       name: '',
     })),
   ];
+  const lip = lipTrees(map).map((tree) => ({ tree, box: lipTreeBounds(tree) }));
+  const limits = cameraBounds(map, HORIZON);
   const strolls = strollTiles(map);
   const visitors = createVisitors(map, 9, Math.random);
   const clouds: Cloud[] = Array.from({ length: 9 }, (_, i) => ({
@@ -128,11 +133,7 @@ export function startMidway(canvas: HTMLCanvasElement, options: MidwayOptions): 
     dpr = Math.min(window.devicePixelRatio || 1, 1.5) * quality;
     canvas.width = Math.max(1, Math.round(canvas.clientWidth * dpr));
     canvas.height = Math.max(1, Math.round(canvas.clientHeight * dpr));
-    // Fit most of the midway on screen, but never so small that people get lost.
-    zoom = Math.max(
-      1.3,
-      Math.min(3, Math.min(canvas.clientWidth / 720, canvas.clientHeight / 540)),
-    );
+    zoom = zoomFor(canvas.clientWidth, canvas.clientHeight);
     view = { w: canvas.clientWidth / zoom, h: canvas.clientHeight / zoom };
     ground = drawGroundLayer(map, zoom * dpr);
   };
@@ -242,18 +243,7 @@ export function startMidway(canvas: HTMLCanvasElement, options: MidwayOptions): 
   };
 
   const updateCamera = (dt: number) => {
-    const focus = toScreen(player.x, player.y);
-    const margin = 40;
-    const left = -map.height * 16 - margin;
-    const right = map.width * 16 + margin;
-    const top = HORIZON - 150;
-    const bottom = (map.width + map.height) * 8 + 30;
-    const fit = (target: number, min: number, max: number, size: number) =>
-      max - min <= size ? (min + max) / 2 - size / 2 : Math.max(min, Math.min(max - size, target));
-    const target = {
-      x: fit(focus.x - view.w / 2, left, right, view.w),
-      y: fit(focus.y - view.h / 2 - 16, top, bottom, view.h),
-    };
+    const target = cameraTarget(limits, toScreen(player.x, player.y), view);
     const ease = cameraReady ? 1 - Math.exp(-dt * 5) : 1;
     camera.x += (target.x - camera.x) * ease;
     camera.y += (target.y - camera.y) * ease;
@@ -261,14 +251,14 @@ export function startMidway(canvas: HTMLCanvasElement, options: MidwayOptions): 
   };
 
   const draw = (t: number) => {
-    // The sky, and clouds drifting slowly behind the midway.
+    // The sky all round the floating island, and clouds drifting slowly behind it.
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const horizon = (HORIZON - camera.y) * zoom;
     const sky = ctx.createLinearGradient(0, horizon - 260 * zoom, 0, horizon);
     sky.addColorStop(0, palette.skyHigh);
     sky.addColorStop(1, palette.sky);
     ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, canvas.clientWidth, Math.max(0, horizon + 2));
+    ctx.fillRect(0, 0, canvas.clientWidth, canvas.clientHeight);
 
     ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom, 0, 0);
     const span = view.w + 200;
@@ -286,7 +276,6 @@ export function startMidway(canvas: HTMLCanvasElement, options: MidwayOptions): 
     const cam = { x: Math.round(camera.x * k) / k, y: Math.round(camera.y * k) / k };
     const visible: Box = { left: cam.x, top: cam.y, right: cam.x + view.w, bottom: cam.y + view.h };
     ctx.setTransform(k, 0, 0, k, -cam.x * k, -cam.y * k);
-    drawField(ctx, visible);
     if (ground) {
       const bounds = groundBounds(map);
       if (ground.scale === k) {
@@ -374,6 +363,9 @@ export function startMidway(canvas: HTMLCanvasElement, options: MidwayOptions): 
       .forEach((d) => d.draw());
 
     drawFrontHedge(ctx, map);
+    // Trees on the cliff's lip stand in front of the hedge, and of everyone.
+    for (const { tree, box } of lip)
+      if (onScreen(box)) faded(box, Infinity, () => drawLipTree(ctx, tree));
     if (onScreen(archBounds(map))) faded(archBounds(map), Infinity, () => drawArch(ctx, map, t));
     drawBunting(ctx, map, t, visible);
     drawFloaters(ctx, floaters);
