@@ -114,3 +114,123 @@ function gridLines(size: number, step: number): number[] {
   lines.push(size);
   return lines;
 }
+
+export type Polygon = readonly (readonly [x: number, y: number])[];
+
+export interface Terrace {
+  level: number;
+  /** Pieces of grid cells that are at or above `level`; together they fill it. */
+  cells: Polygon[];
+}
+
+/**
+ * The ground above each whole level of `field`, as filled shapes, so the
+ * terrain can be drawn as stacked terraces. Each cell of a grid `step` tiles
+ * apart contributes the part of itself at or above the level (filled
+ * marching squares), over [x0, x1] × [y0, y1]. Cells wholly above the level
+ * come back as plain squares.
+ */
+export function terraces(
+  field: (x: number, y: number) => number,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  step = 0.5,
+): Terrace[] {
+  const xs = gridLines(x1 - x0, step).map((x) => x + x0);
+  const ys = gridLines(y1 - y0, step).map((y) => y + y0);
+  const cols = xs.length - 1;
+  const rows = ys.length - 1;
+  const values: number[] = [];
+  let low = Infinity;
+  let high = -Infinity;
+  for (let j = 0; j <= rows; j++) {
+    for (let i = 0; i <= cols; i++) {
+      const v = field(xs[i], ys[j]);
+      values.push(v);
+      low = Math.min(low, v);
+      high = Math.max(high, v);
+    }
+  }
+  const value = (i: number, j: number) => values[j * (cols + 1) + i];
+
+  const result: Terrace[] = [];
+  for (let level = Math.ceil(low); level <= Math.floor(high); level++) {
+    const cells: Polygon[] = [];
+    for (let j = 0; j < rows; j++) {
+      for (let i = 0; i < cols; i++) {
+        const corners = [
+          [xs[i], ys[j], value(i, j)],
+          [xs[i + 1], ys[j], value(i + 1, j)],
+          [xs[i + 1], ys[j + 1], value(i + 1, j + 1)],
+          [xs[i], ys[j + 1], value(i, j + 1)],
+        ] as const;
+        // Walk the corners clockwise, keeping those above the level and the
+        // points where the level crosses an edge.
+        const shape: [number, number][] = [];
+        for (let k = 0; k < 4; k++) {
+          const [ax, ay, av] = corners[k];
+          const [bx, by, bv] = corners[(k + 1) % 4];
+          if (av >= level) shape.push([ax, ay]);
+          if (av >= level !== bv >= level) {
+            const s = (level - av) / (bv - av);
+            shape.push([ax + (bx - ax) * s, ay + (by - ay) * s]);
+          }
+        }
+        if (shape.length >= 3) cells.push(shape);
+      }
+    }
+    result.push({ level, cells });
+  }
+  return result;
+}
+
+/** The area of a polygon, positive when its points run clockwise on screen. */
+export function polygonArea(points: Polygon): number {
+  let sum = 0;
+  for (let i = 0; i < points.length; i++) {
+    const [ax, ay] = points[i];
+    const [bx, by] = points[(i + 1) % points.length];
+    sum += ax * by - bx * ay;
+  }
+  return sum / 2;
+}
+
+/** A repeatable number in [0, 1) for a grid position. */
+export function hash(x: number, y: number, salt = 0): number {
+  let h = (x * 374761393 + y * 668265263 + salt * 2147483647) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+/**
+ * Stipple dots for printed terrain: one candidate every `step` tiles over
+ * [0, width] × [0, height], kept when its hash falls under `density(x, y)`,
+ * and jittered within its cell. The same map always gets the same dots.
+ */
+export function stipple(
+  width: number,
+  height: number,
+  density: (x: number, y: number) => number,
+  step = 0.25,
+): [number, number][] {
+  const dots: [number, number][] = [];
+  for (let j = 0; j * step < height; j++) {
+    for (let i = 0; i * step < width; i++) {
+      const x = (i + 0.2 + hash(i, j, 1) * 0.6) * step;
+      const y = (j + 0.2 + hash(i, j, 2) * 0.6) * step;
+      if (x < width && y < height && hash(i, j, 3) < density(x, y)) dots.push([x, y]);
+    }
+  }
+  return dots;
+}
+
+/**
+ * Which tint a terrace is printed in: the lowest step gets the lightest, the
+ * highest the darkest, spread evenly over the tints there are.
+ */
+export function terraceTint(level: number, lowest: number, highest: number, tints: number) {
+  if (highest <= lowest) return 0;
+  return Math.round(((level - lowest) / (highest - lowest)) * (tints - 1));
+}

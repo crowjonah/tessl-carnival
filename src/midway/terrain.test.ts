@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { contours, elevation, hillsFor, type Segment } from './terrain';
+import {
+  contours,
+  elevation,
+  hillsFor,
+  polygonArea,
+  stipple,
+  terraces,
+  terraceTint,
+  type Polygon,
+  type Segment,
+} from './terrain';
 
 /** Walks the segments end to end and returns the closed rings they form. */
 function rings(segments: readonly Segment[]): number[] {
@@ -112,5 +122,93 @@ describe('contours', () => {
       expect(Math.max(x1, x2)).toBeLessThanOrEqual(2);
     }
     expect(Math.max(...line.segments.flatMap(([x1, , x2]) => [x1, x2]))).toBeCloseTo(2);
+  });
+});
+
+describe('terraces', () => {
+  const area = (cells: readonly Polygon[]) => cells.reduce((sum, c) => sum + polygonArea(c), 0);
+
+  it('fills the ground at or above each whole level, smaller as it climbs', () => {
+    const hills = [{ x: 5, y: 5, spread: 1.5, height: 3.5 }];
+    const steps = terraces((x, y) => elevation(hills, x, y), 0, 0, 10, 10, 0.25);
+    expect(steps.map((s) => s.level)).toEqual([1, 2, 3]);
+    expect(area(steps[0].cells)).toBeLessThan(100);
+    for (let k = 1; k < steps.length; k++) {
+      expect(area(steps[k].cells)).toBeGreaterThan(0);
+      expect(area(steps[k].cells)).toBeLessThan(area(steps[k - 1].cells));
+    }
+    // Level 2 is about the disc where the hill is over 2 tall.
+    const r = 1.5 * Math.sqrt(2 * Math.log(3.5 / 2));
+    expect(area(steps[1].cells)).toBeCloseTo(Math.PI * r * r, 0);
+  });
+
+  it('winds every piece clockwise and keeps it inside the area', () => {
+    const hills = hillsFor(24, 20);
+    const steps = terraces((x, y) => elevation(hills, x, y, 0.12), -2, -2, 26, 22);
+    for (const { cells } of steps) {
+      for (const cell of cells) {
+        expect(polygonArea(cell)).toBeGreaterThan(0);
+        for (const [x, y] of cell) {
+          expect(x).toBeGreaterThanOrEqual(-2);
+          expect(x).toBeLessThanOrEqual(26);
+          expect(y).toBeGreaterThanOrEqual(-2);
+          expect(y).toBeLessThanOrEqual(22);
+        }
+      }
+    }
+  });
+
+  it('covers the whole area at a level everything is above', () => {
+    const [step] = terraces((x) => 1 + (x - 2) * 0.1, 2, 3, 7, 5);
+    expect(step.level).toBe(1);
+    expect(area(step.cells)).toBeCloseTo(10);
+  });
+
+  it('ends its edges on the contour lines of the same level', () => {
+    const field = (x: number) => x * 0.5;
+    const [step] = terraces(field, 0, 0, 4, 4, 0.5).filter((s) => s.level === 1);
+    const xs = step.cells.flatMap((c) => c.map(([x]) => x));
+    expect(Math.min(...xs)).toBeCloseTo(2);
+    expect(area(step.cells)).toBeCloseTo(8);
+  });
+
+  it('gives the same shapes every time for the same map', () => {
+    const hills = hillsFor(24, 24);
+    const field = (x: number, y: number) => elevation(hills, x, y, 0.12);
+    expect(terraces(field, 0, 0, 24, 24)).toEqual(terraces(field, 0, 0, 24, 24));
+  });
+});
+
+describe('stipple', () => {
+  it('scatters the same dots every time, inside the area', () => {
+    const dots = stipple(6, 4, () => 0.3);
+    expect(dots).toEqual(stipple(6, 4, () => 0.3));
+    for (const [x, y] of dots) {
+      expect(x).toBeGreaterThanOrEqual(0);
+      expect(x).toBeLessThan(6);
+      expect(y).toBeGreaterThanOrEqual(0);
+      expect(y).toBeLessThan(4);
+    }
+  });
+
+  it('stays sparse: about the density asked for, none where it is zero', () => {
+    const candidates = (6 / 0.25) * (4 / 0.25);
+    const dots = stipple(6, 4, () => 0.2);
+    expect(dots.length / candidates).toBeGreaterThan(0.12);
+    expect(dots.length / candidates).toBeLessThan(0.28);
+    expect(stipple(6, 4, (x) => (x < 3 ? 0 : 1)).every(([x]) => x >= 3 - 0.25)).toBe(true);
+  });
+});
+
+describe('terraceTint', () => {
+  it('runs from the lightest tint at the bottom to the darkest at the top', () => {
+    expect(terraceTint(-2, -2, 6, 7)).toBe(0);
+    expect(terraceTint(6, -2, 6, 7)).toBe(6);
+    const all = [-2, -1, 0, 1, 2, 3, 4, 5, 6].map((level) => terraceTint(level, -2, 6, 7));
+    expect(all).toEqual([...all].sort((a, b) => a - b));
+  });
+
+  it('uses the first tint when there is only one level', () => {
+    expect(terraceTint(3, 3, 3, 7)).toBe(0);
   });
 });

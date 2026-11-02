@@ -1,7 +1,18 @@
 import { canvasFont, theme } from '../carnival';
 import bannerUrl from './aidevcon-banner.png';
 import { palette } from './palette';
-import { contours, elevation, hillsFor, type Contour } from './terrain';
+import {
+  contours,
+  elevation,
+  hash,
+  hillsFor,
+  stipple,
+  terraces,
+  terraceTint,
+  type Contour,
+  type Polygon,
+  type Terrace,
+} from './terrain';
 import {
   CART_KINDS,
   toScreen,
@@ -31,7 +42,7 @@ function at(x: number, y: number, z = 0): Pt {
 const ISO_RX = 16 * Math.SQRT2;
 const ISO_RY = 8 * Math.SQRT2;
 
-function poly(ctx: Ctx, points: readonly Pt[], color: string) {
+function poly(ctx: Ctx, points: readonly Pt[], color: string | CanvasPattern) {
   ctx.fillStyle = color;
   ctx.beginPath();
   ctx.moveTo(points[0][0], points[0][1]);
@@ -211,7 +222,9 @@ function signBoard(
     ctx.lineWidth = 2;
     ctx.stroke();
   }
-  ctx.font = canvasFont('small', 'bold');
+  text = text.toUpperCase();
+  ctx.font = canvasFont('small', 'bold', 'display');
+  ctx.letterSpacing = '1px';
   const fit = Math.min(
     (height * 0.62) / theme.font.small,
     (width - 8) / ctx.measureText(text).width,
@@ -223,18 +236,13 @@ function signBoard(
   ctx.textBaseline = 'middle';
   ctx.fillText(text, 0, 1);
   ctx.restore();
+  ctx.letterSpacing = '0px';
 }
 
 // ── Ground ────────────────────────────────────────────────────────────────
 
 /** The world-pixel height of the horizon; the field runs off to it. */
 export const HORIZON = -24;
-
-function hash(x: number, y: number, salt = 0): number {
-  let h = (x * 374761393 + y * 668265263 + salt * 2147483647) | 0;
-  h = Math.imul(h ^ (h >>> 13), 1274126177);
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-}
 
 function rectPoints(r: Rect, lift = 0): Pt[] {
   return [
@@ -251,7 +259,8 @@ export function groundBounds(map: MidwayMap): Box {
     left: -map.height * 16 - 64,
     right: map.width * 16 + 64,
     top: -64,
-    bottom: (map.width + map.height) * 8 + 4,
+    // Room under the front edge for the terraces' risers and their shadows.
+    bottom: (map.width + map.height) * 8 + TERRACE_RISE + 12,
   };
 }
 
@@ -292,13 +301,16 @@ export function drawGroundLayer(map: MidwayMap, wanted: number): GroundLayer {
   const ctx = canvas.getContext('2d')!;
   ctx.setTransform(scale, 0, 0, scale, -bounds.left * scale, -bounds.top * scale);
 
-  // Lighter plots of grass inside the hedge, with contour lines over them.
-  poly(ctx, rectPoints({ x: 0, y: 0, w: map.width, h: map.height }), palette.grassLight);
+  // The terrain as stacked terraces, printed with stipple, ruled with contours.
+  drawTerraces(ctx, map);
+  drawStipple(ctx, map);
   drawContours(ctx, map);
 
-  // Paths in a grey casing, like roads on a map, with the avenue named.
+  // Paths in a dark casing, like roads on an atlas, with the avenue named.
+  // They and the booths' pads are cut level into the terraces.
   for (const path of map.paths) poly(ctx, rectPoints(grow(path, 0.08)), palette.pathCasing);
   for (const path of map.paths) poly(ctx, rectPoints(path), palette.path);
+  for (const slot of map.booths) boothPad(ctx, slot);
   pathName(ctx, map);
 
   // Trees out in the field behind the midway.
@@ -314,22 +326,157 @@ function grow(r: Rect, by: number): Rect {
   return { x: r.x - by, y: r.y - by, w: r.w + by * 2, h: r.h + by * 2 };
 }
 
+/** The midway's elevation field, the same for every drawing of a map. */
+function fieldFor(map: MidwayMap) {
+  const hills = hillsFor(map.width, map.height);
+  return (x: number, y: number) => elevation(hills, x, y, 0.12);
+}
+
+/** How far the terraces reach past the back hedge, under the trees, in tiles. */
+const TERRACE_MARGIN = 2;
+/** The height of each terrace's riser, in world pixels. */
+export const TERRACE_RISE = 4;
+
 /** Contour lines, computed once per map, since the terrain never changes. */
 const contourCache = new WeakMap<MidwayMap, Contour[]>();
+/** Terrace shapes, computed once per map for the same reason. */
+const terraceCache = new WeakMap<MidwayMap, Terrace[]>();
+/** Stipple dots, computed once per map. */
+const stippleCache = new WeakMap<MidwayMap, [number, number][]>();
+
+function terracesFor(map: MidwayMap): Terrace[] {
+  let steps = terraceCache.get(map);
+  if (!steps) {
+    const m = TERRACE_MARGIN;
+    steps = terraces(fieldFor(map), -m, -m, map.width, map.height);
+    terraceCache.set(map, steps);
+  }
+  return steps;
+}
+
+function tracePolygons(ctx: Ctx, cells: readonly Polygon[], lift: number) {
+  ctx.beginPath();
+  for (const cell of cells) {
+    const first = at(cell[0][0], cell[0][1], lift);
+    ctx.moveTo(first[0], first[1]);
+    for (let i = 1; i < cell.length; i++) {
+      const p = at(cell[i][0], cell[i][1], lift);
+      ctx.lineTo(p[0], p[1]);
+    }
+    ctx.closePath();
+  }
+}
+
+/**
+ * Stacked terraces: for each level, low to high, a halftone shadow and a
+ * riser hang below the terrace's front edges, then its top is printed over
+ * them. The tops stay at ground height, so walkers, booths and clicks line
+ * up with them exactly; only the risers show the step.
+ */
+function drawTerraces(ctx: Ctx, map: MidwayMap) {
+  const steps = terracesFor(map);
+  const m = TERRACE_MARGIN;
+  const tints = palette.terraces;
+  poly(ctx, rectPoints({ x: -m, y: -m, w: map.width + m, h: map.height + m }), tints[0]);
+  if (steps.length === 0) return;
+  const lowest = steps[0].level;
+  const highest = steps[steps.length - 1].level;
+  const dots = halftone(ctx);
+  ctx.lineJoin = 'round';
+  for (const { level, cells } of steps) {
+    const tint = tints[terraceTint(level, lowest, highest, tints.length)];
+    if (dots) {
+      ctx.fillStyle = dots;
+      tracePolygons(ctx, cells, -TERRACE_RISE - 5);
+      ctx.fill();
+    }
+    ctx.fillStyle = level % 5 === 0 ? palette.riserDark : palette.riser;
+    tracePolygons(ctx, cells, -TERRACE_RISE);
+    ctx.fill();
+    // A hairline in the same tint hides the seams between neighbouring cells.
+    ctx.fillStyle = tint;
+    ctx.strokeStyle = tint;
+    ctx.lineWidth = 0.6;
+    tracePolygons(ctx, cells, 0);
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+/**
+ * A sparse halftone of cyan dots, for shadows. Made once and kept: a pattern
+ * belongs to no particular canvas, so every ground layer can share it.
+ */
+let halftonePattern: CanvasPattern | null | undefined;
+
+function halftone(ctx: Ctx): CanvasPattern | null {
+  if (halftonePattern !== undefined) return halftonePattern;
+  const tile = document.createElement('canvas');
+  tile.width = 6;
+  tile.height = 6;
+  const t = tile.getContext('2d');
+  if (!t) return (halftonePattern = null);
+  t.fillStyle = palette.halftone;
+  for (const [x, y] of [
+    [1.5, 1.5],
+    [4.5, 4.5],
+  ]) {
+    t.beginPath();
+    t.arc(x, y, 0.9, 0, Math.PI * 2);
+    t.fill();
+  }
+  halftonePattern = ctx.createPattern(tile, 'repeat');
+  return halftonePattern;
+}
+
+/** Stipple on the terrain, thicker where the ground is steeper, as an engraver would. */
+function drawStipple(ctx: Ctx, map: MidwayMap) {
+  let dots = stippleCache.get(map);
+  if (!dots) {
+    const field = fieldFor(map);
+    dots = stipple(map.width, map.height, (x, y) => {
+      const slope = Math.hypot(
+        field(x + 0.1, y) - field(x - 0.1, y),
+        field(x, y + 0.1) - field(x, y - 0.1),
+      );
+      return Math.min(0.32, 0.03 + slope * 0.6);
+    });
+    stippleCache.set(map, dots);
+  }
+  ctx.fillStyle = palette.stipple;
+  ctx.beginPath();
+  for (const [x, y] of dots) {
+    const [px, py] = at(x, y);
+    ctx.moveTo(px + 0.55, py);
+    ctx.arc(px, py, 0.55, 0, Math.PI * 2);
+  }
+  ctx.fill();
+}
+
+/** A level paper pad cut into the terrace under a booth, ruled in ink. */
+function boothPad(ctx: Ctx, slot: BoothSlot) {
+  const pad = rectPoints({ x: slot.x - 0.05, y: slot.y - 0.05, w: 2.1, h: 2.1 });
+  poly(ctx, pad, palette.path);
+  ctx.strokeStyle = palette.pathCasing;
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  pad.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+  ctx.closePath();
+  ctx.stroke();
+}
 
 function drawContours(ctx: Ctx, map: MidwayMap) {
   let lines = contourCache.get(map);
   if (!lines) {
-    const hills = hillsFor(map.width, map.height);
-    lines = contours((x, y) => elevation(hills, x, y, 0.12), map.width, map.height);
+    lines = contours(fieldFor(map), map.width, map.height);
     contourCache.set(map, lines);
   }
   ctx.lineCap = 'round';
   for (const { level, segments } of lines) {
-    // Every fifth line is an index contour, drawn heavier, as on a survey map.
+    // Every line is a terrace's rim; every fifth is an index contour, drawn heavier.
     const index = level % 5 === 0;
-    ctx.strokeStyle = index ? palette.contourIndex : palette.contour;
-    ctx.lineWidth = index ? 1.2 : 0.7;
+    ctx.strokeStyle = index ? palette.contourIndex : palette.terraceEdge;
+    ctx.lineWidth = index ? 1.1 : 0.6;
     ctx.beginPath();
     for (const [x1, y1, x2, y2] of segments) {
       const a = at(x1, y1);
@@ -347,13 +494,13 @@ function pathName(ctx: Ctx, map: MidwayMap) {
   ctx.save();
   // Local x runs north up the avenue, local y across it.
   ctx.transform(0.894, -0.447, 0.894, 0.447, centre[0], centre[1]);
-  ctx.font = `600 7px ${theme.font.family}`;
-  ctx.letterSpacing = '3px';
+  ctx.font = `bold 9px ${theme.font.display}`;
+  ctx.letterSpacing = '4px';
   ctx.fillStyle = palette.contourLabel;
-  ctx.globalAlpha = 0.7;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText('MIDWAY', 0, 0);
+  ctx.letterSpacing = '0px';
   ctx.restore();
 }
 
@@ -370,6 +517,8 @@ function tree(ctx: Ctx, x: number, y: number) {
     ],
     palette.woodDark,
   );
+  // The canopy's second ink, printed a little off register.
+  oval(ctx, px + 1.6, py - 19, 10, 10, palette.misregister);
   oval(ctx, px, py - 20, 11, 11, palette.hedgeDark);
   oval(ctx, px - 2, py - 22, 9, 9, palette.hedge);
   oval(ctx, px - 4, py - 25, 4, 4, palette.hedgeLight);
@@ -1435,7 +1584,11 @@ function booth(ctx: Ctx, slot: BoothSlot, name: string, t: number, glow: boolean
   const y1 = y0 + s;
   const wall = BOOTH_WALL;
 
-  poly(ctx, rectPoints({ x: x0 + 0.35, y: y0 + 0.35, w: s, h: s }), palette.shadow);
+  const shade = rectPoints({ x: x0 + 0.35, y: y0 + 0.35, w: s, h: s });
+  poly(ctx, shade, palette.shadow);
+  // A halftone over the cast shadow, as if printed. The pattern is made once.
+  const dots = halftone(ctx);
+  if (dots) poly(ctx, shade, dots);
   box(ctx, x0, y0, s, s, 0, wall, scheme.wall, scheme.wall, scheme.wallShade);
 
   // A window and counter on both faces we can see.

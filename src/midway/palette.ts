@@ -3,61 +3,74 @@ import { theme } from '../carnival';
 const { colors } = theme;
 
 /**
- * The midway map's palette, drawn like a light topographic map. Brand blues,
- * whites and inks come from the carnival theme; the terrain greens, contour
- * lines, water and other scenery shades only the map uses live here.
+ * The midway map's palette, printed like a limited-ink atlas: white paper,
+ * cyan, vermilion and forest-green inks with their lighter tints, and dark
+ * linework. Full-strength inks come from the carnival theme; the tints and
+ * print effects only the map uses live here.
  */
 export const palette = {
-  sky: '#dceaf3',
-  skyHigh: '#b9d6ea',
+  sky: '#f4f8f7',
+  skyHigh: '#d9edf2',
   cloud: colors.foreground,
-  cloudShade: '#e3edf4',
-  haze: '#c9dfe0',
+  cloudShade: '#cfe7ee',
+  haze: '#e3efec',
 
-  grass: '#cfe0b4',
-  grassDark: '#a9c487',
-  grassEdge: '#9cb87d',
-  grassLight: '#e1ecc9',
+  /** The field round the midway: pale green paper. */
+  grass: '#e4efe2',
+  /** Terrace tops, from the lowest step to the highest, in green-ink tints. */
+  terraces: ['#eef5ea', '#dcebd5', '#c8e0c0', '#b2d3ab', '#9cc597', '#86b683', '#6fa671'],
+  /** Riser faces under each terrace's front edge. */
+  riser: '#5e8f63',
+  riserDark: '#3f6e48',
+  /** The crisp dark rim on top of each riser. */
+  terraceEdge: 'rgba(22, 35, 42, 0.55)',
   path: colors.foreground,
   pathShade: colors.border,
   /** Casing either side of a path, like a road on a map. */
-  pathCasing: '#a8a8a8',
+  pathCasing: colors.text,
   /** Index contours (every fifth) are drawn darker than the rest. */
-  contour: 'rgba(120, 92, 52, 0.28)',
-  contourIndex: 'rgba(120, 92, 52, 0.5)',
-  contourLabel: '#6e5530',
-  hedge: '#7fa65a',
-  hedgeDark: '#5f8a3f',
-  hedgeLight: '#9cc073',
-  shadow: 'rgba(40, 60, 30, 0.22)',
+  contour: 'rgba(44, 106, 69, 0.35)',
+  contourIndex: 'rgba(44, 106, 69, 0.65)',
+  contourLabel: colors.accent,
+  /** Print textures: stipple on the terraces, halftone in shadows. */
+  stipple: 'rgba(44, 106, 69, 0.5)',
+  halftone: 'rgba(0, 100, 138, 0.55)',
+  /** The second ink, printed slightly off register on selected scenery. */
+  misregister: 'rgba(194, 57, 27, 0.5)',
+  hedge: '#4f8a5c',
+  hedgeDark: colors.forest,
+  hedgeLight: '#7fb48a',
+  shadow: 'rgba(0, 77, 107, 0.2)',
 
-  red: colors.danger,
-  redShade: '#9c2216',
+  red: colors.accent,
+  redShade: '#8f2a14',
   cream: colors.foreground,
-  creamShade: '#e4e4e4',
-  gold: '#f0a830',
-  goldShade: '#c98512',
+  creamShade: '#dde6e4',
+  /** What was gold is now a vermilion tint, so there are only three inks. */
+  gold: '#f19a7e',
+  goldShade: '#d4664a',
   blue: colors.brand,
   blueShade: colors.brandPress,
-  sky2: '#6cb7e2',
-  pink: '#e58fae',
-  pinkShade: '#c86e8f',
+  sky2: '#69b7d1',
+  /** What was pink is now a cyan tint. */
+  pink: colors.stripeB,
+  pinkShade: '#5fa9c2',
   wood: colors.wood,
-  woodDark: '#6b4429',
-  woodLight: '#b7834f',
-  board: '#ece4d6',
-  metal: '#f0f0f0',
-  metalShade: '#b5b5b5',
+  woodDark: '#4e3220',
+  woodLight: '#a8774f',
+  board: '#eef2f0',
+  metal: '#f0f3f2',
+  metalShade: '#8fa3a0',
   ink: colors.text,
-  opening: '#3d3d3d',
-  closed: '#c2c2c2',
-  closedShade: '#8c8c8c',
+  opening: '#24343b',
+  closed: '#c8d1cf',
+  closedShade: '#6e7f7c',
   white: '#ffffff',
 
   skins: ['#f1c27d', '#c68642', '#8d5524', '#e0ac69', '#ffdbac'],
-  hairs: ['#3b2219', colors.text, '#a55728', '#e6c35c', '#6b4429'],
-  shirts: [colors.water, '#7bd389', '#b48ee0', colors.danger, colors.brand, colors.foreground],
-  pants: ['#2d3a6b', '#3b3b4f', '#5a4a3a'],
-  bunting: [colors.brand, '#f0a830', colors.danger, colors.foreground],
-  balloons: [colors.danger, '#f0a830', colors.brand, colors.water, '#e58fae'],
+  hairs: ['#3b2219', colors.text, '#8f2a14', '#d9a15c', '#4e3220'],
+  shirts: [colors.water, colors.forest, colors.accent, '#f19a7e', colors.brand, colors.foreground],
+  pants: [colors.text, '#2f4a52', '#4e3220'],
+  bunting: [colors.brand, colors.accent, colors.forest, colors.foreground],
+  balloons: [colors.accent, '#f19a7e', colors.brand, colors.stripeB, colors.forest],
 } as const;
