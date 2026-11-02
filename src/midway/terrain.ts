@@ -46,7 +46,9 @@ export interface Contour {
 
 /**
  * Contour lines of `field` over the area [0, width] × [0, height], one for
- * every whole level, by marching squares on a grid `step` tiles apart.
+ * every whole level, by marching squares on a grid `step` tiles apart. When
+ * a side is not a whole number of steps, the last cell on it is narrower, so
+ * the grid still ends exactly on the edge.
  */
 export function contours(
   field: (x: number, y: number) => number,
@@ -54,14 +56,16 @@ export function contours(
   height: number,
   step = 0.25,
 ): Contour[] {
-  const cols = Math.round(width / step);
-  const rows = Math.round(height / step);
+  const xs = gridLines(width, step);
+  const ys = gridLines(height, step);
+  const cols = xs.length - 1;
+  const rows = ys.length - 1;
   const values: number[] = [];
   let low = Infinity;
   let high = -Infinity;
   for (let j = 0; j <= rows; j++) {
     for (let i = 0; i <= cols; i++) {
-      const v = field(i * step, j * step);
+      const v = field(xs[i], ys[j]);
       values.push(v);
       low = Math.min(low, v);
       high = Math.max(high, v);
@@ -77,10 +81,10 @@ export function contours(
         // Corners clockwise from the top left, and where the level crosses
         // each edge between them.
         const corners = [
-          [i, j, value(i, j)],
-          [i + 1, j, value(i + 1, j)],
-          [i + 1, j + 1, value(i + 1, j + 1)],
-          [i, j + 1, value(i, j + 1)],
+          [xs[i], ys[j], value(i, j)],
+          [xs[i + 1], ys[j], value(i + 1, j)],
+          [xs[i + 1], ys[j + 1], value(i + 1, j + 1)],
+          [xs[i], ys[j + 1], value(i, j + 1)],
         ] as const;
         const crossings: [number, number][] = [];
         for (let k = 0; k < 4; k++) {
@@ -88,7 +92,7 @@ export function contours(
           const [bx, by, bv] = corners[(k + 1) % 4];
           if (av >= level === bv >= level) continue;
           const s = (level - av) / (bv - av);
-          crossings.push([(ax + (bx - ax) * s) * step, (ay + (by - ay) * s) * step]);
+          crossings.push([ax + (bx - ax) * s, ay + (by - ay) * s]);
         }
         // Two crossings make one segment; four (a saddle) make two.
         for (let k = 0; k + 1 < crossings.length; k += 2) {
@@ -100,4 +104,13 @@ export function contours(
     result.push({ level, segments });
   }
   return result;
+}
+
+/** Grid positions `step` apart from 0, ending exactly on `size`. */
+function gridLines(size: number, step: number): number[] {
+  const count = Math.ceil(size / step - 1e-9);
+  const lines: number[] = [];
+  for (let i = 0; i < count; i++) lines.push(i * step);
+  lines.push(size);
+  return lines;
 }
