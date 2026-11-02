@@ -172,6 +172,44 @@ describe('terraces', () => {
     expect(area(step.cells)).toBeCloseTo(8);
   });
 
+  describe('on a saddle, where the high corners are diagonally opposite', () => {
+    // The edges of the pieces that run inside the cell, not along its border:
+    // the rims, which should be exactly the contour segments.
+    const rims = (cells: readonly Polygon[]) =>
+      cells.flatMap((cell) =>
+        cell.flatMap(([ax, ay], k) => {
+          const [bx, by] = cell[(k + 1) % cell.length];
+          const onBorder = [0, 1].some((e) => (ax === e && bx === e) || (ay === e && by === e));
+          return onBorder ? [] : [[ax, ay, bx, by] as const];
+        }),
+      );
+    const unordered = (segments: readonly Segment[]) =>
+      segments.map(([x1, y1, x2, y2]) => [`${x1},${y1}`, `${x2},${y2}`].sort().join(' ')).sort();
+
+    // Corners clockwise from the top left: [0, 2, 0, 2] and [2, 0, 2, 0].
+    const saddle = (x: number, y: number) => 2 * x + 2 * y - 4 * x * y;
+    const cases = [
+      { name: 'top right and bottom left high', field: saddle, pieces: 2, area: 0.25 },
+      {
+        name: 'top left and bottom right high',
+        field: (x: number, y: number) => 2 - saddle(x, y),
+        pieces: 1,
+        area: 0.75,
+      },
+    ];
+
+    for (const { name, field, pieces, area: expected } of cases) {
+      it(`fills the same regions the contour rims enclose: ${name}`, () => {
+        const [step] = terraces(field, 0, 0, 1, 1, 1).filter((s) => s.level === 1);
+        const [line] = contours(field, 1, 1, 1).filter((c) => c.level === 1);
+        expect(step.cells).toHaveLength(pieces);
+        for (const cell of step.cells) expect(polygonArea(cell)).toBeGreaterThan(0);
+        expect(area(step.cells)).toBeCloseTo(expected);
+        expect(unordered(rims(step.cells))).toEqual(unordered(line.segments));
+      });
+    }
+  });
+
   it('gives the same shapes every time for the same map', () => {
     const hills = hillsFor(24, 24);
     const field = (x: number, y: number) => elevation(hills, x, y, 0.12);

@@ -178,7 +178,12 @@ export function terraces(
             shape.push([ax + (bx - ax) * s, ay + (by - ay) * s]);
           }
         }
-        if (shape.length >= 3) cells.push(shape);
+        // A saddle with only the top right and bottom left corners above the
+        // level: the contours pair the crossings round each of those corners,
+        // so the ground above is two separate corners, not one band across.
+        const [tl, tr, br, bl] = corners.map(([, , v]) => v >= level);
+        if (tr && bl && !tl && !br) cells.push(shape.slice(0, 3), shape.slice(3));
+        else if (shape.length >= 3) cells.push(shape);
       }
     }
     result.push({ level, cells });
