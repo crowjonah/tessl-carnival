@@ -7,7 +7,11 @@ Land rings on the bottle necks before you run out. Bottles farther back score mo
 - Move the mouse to aim: the white circle shows where your next ring will land.
 - Your hand sways left and right, by up to 24 pixels, so the circle drifts. Time your throw.
 - Click to throw a ring. It flies for 0.6 seconds, and you can't throw another until it lands.
-- Rings always land behind the dashed foul line, among the bottles.
+- A ring can't land below the dashed foul line. If you aim below the line,
+  the ring lands on the line instead, which is a miss: the foul line doesn't steer
+  rings onto a bottle.
+- To score, aim the swaying white circle at a bottle neck. A ring that lands on the
+  foul line, between bottles or outside the bottle rows scores nothing.
 - You have 8 rings. The round ends when the last ring has landed.
 - Click again on the game over screen to play another round.
 

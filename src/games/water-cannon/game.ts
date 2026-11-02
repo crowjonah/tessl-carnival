@@ -163,7 +163,7 @@ function draw(
     ctx.fill();
   }
 
-  ctx.fillStyle = '#4fc3f7';
+  ctx.fillStyle = colors.water;
   for (const shot of state.shots) {
     ctx.beginPath();
     ctx.arc(shot.x, shot.y, 5, 0, Math.PI * 2);
