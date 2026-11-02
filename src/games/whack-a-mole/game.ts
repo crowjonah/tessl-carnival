@@ -16,6 +16,8 @@ export const GRID_COLUMNS = 3;
 export const GRID_ROWS = 3;
 export const HOLE_RADIUS = 50;
 const BONK_TIME = 0.3;
+/** Rounding slack, so time added up across many steps still reaches the end of the round. */
+const EPSILON = 1e-9;
 
 /** The centre of each hole, row by row from the top left. */
 export const HOLES = Array.from({ length: GRID_COLUMNS * GRID_ROWS }, (_, i) => ({
@@ -94,32 +96,57 @@ export function holeAt(x: number, y: number): number {
   return HOLES.findIndex((h) => Math.hypot(x - h.x, y - h.y) <= HOLE_RADIUS);
 }
 
-/** Advances the round by `dt` seconds. Time past the end of the round is ignored. */
-export function step(state: WhackAMoleState, dt: number, random: Random = Math.random): void {
-  if (state.phase !== 'playing') return;
-  const used = Math.min(dt, timeLeft(state));
-  state.elapsed = used < dt ? ROUND_DURATION : state.elapsed + used;
+/** Ages the moles and bonks by `dt` seconds, with no spawn due inside it. */
+function advance(state: WhackAMoleState, dt: number): void {
+  state.elapsed += dt;
+  state.nextSpawn -= dt;
 
-  for (const bonk of state.bonks) bonk.age += used;
+  for (const bonk of state.bonks) bonk.age += dt;
   state.bonks = state.bonks.filter((b) => b.age < BONK_TIME);
 
   state.holes = state.holes.map((mole) => {
     if (!mole) return null;
-    mole.age += used;
+    mole.age += dt;
     return mole.age < MOLE_LIFETIME ? mole : null;
   });
+}
 
-  if (state.elapsed >= ROUND_DURATION) {
+/**
+ * Advances the round by `dt` seconds. Spawns and expiries happen in order at
+ * their own moment inside the step, so one long step and several short ones
+ * covering the same time end the same way. Time past the end of the round is
+ * ignored.
+ */
+export function step(state: WhackAMoleState, dt: number, random: Random = Math.random): void {
+  if (state.phase !== 'playing') return;
+  const endsRound = dt >= timeLeft(state) - EPSILON;
+  let remaining = Math.min(dt, timeLeft(state));
+
+  while (remaining > EPSILON) {
+    const span = Math.min(remaining, state.nextSpawn);
+    advance(state, span);
+    remaining -= span;
+    if (state.nextSpawn <= 0) {
+      spawnMole(state, random);
+      state.nextSpawn += spawnInterval(state.elapsed);
+    }
+  }
+
+  if (endsRound) {
+    state.elapsed = ROUND_DURATION;
     state.phase = 'over';
     state.holes = state.holes.map(() => null);
-    return;
   }
+}
 
-  state.nextSpawn -= used;
-  if (state.nextSpawn <= 0) {
-    spawnMole(state, random);
-    state.nextSpawn = spawnInterval(state.elapsed);
-  }
+/**
+ * Seconds of round time between two animation frames. Every second of a slow
+ * frame counts. `previous` is null on the first frame and after the tab was
+ * hidden, so the round pauses while nobody can see it.
+ */
+export function frameSeconds(previous: number | null, time: number): number {
+  if (previous === null) return 0;
+  return Math.max((time - previous) / 1000, 0);
 }
 
 function draw(ctx: CanvasRenderingContext2D, state: WhackAMoleState) {
@@ -232,13 +259,17 @@ export const whackAMole: CarnivalGame = {
     };
     canvas.addEventListener('pointerdown', onDown);
 
+    // A hidden tab gets no frames, so its time is skipped rather than counted.
+    let last: number | null = null;
+    const onVisibility = () => {
+      if (document.hidden) last = null;
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
     let frame = 0;
-    let last = performance.now();
     const loop = (time: number) => {
-      // Cap the step so a background tab doesn't skip the round.
-      const dt = Math.min((time - last) / 1000, 0.05);
+      step(state, frameSeconds(last, time));
       last = time;
-      step(state, dt);
       if (state.phase === 'over' && !scoreRecorded) {
         recordScore(whackAMole.id, state.score);
         scoreRecorded = true;
@@ -251,6 +282,7 @@ export const whackAMole: CarnivalGame = {
     return () => {
       cancelAnimationFrame(frame);
       canvas.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   },
 };

@@ -8,6 +8,7 @@ import {
   ROUND_DURATION,
   START_SPAWN_INTERVAL,
   createState,
+  frameSeconds,
   holeAt,
   spawnInterval,
   spawnMole,
@@ -163,6 +164,68 @@ describe('whack-a-mole', () => {
       phase: 'playing',
     });
     expect(spawnInterval(fresh.elapsed)).toBe(START_SPAWN_INTERVAL);
+  });
+
+  it('keeps the overshoot past a spawn, so a mole due at 1 s is gone by 2 s', () => {
+    const state = createState();
+    step(state, 1.5, first);
+    expect(state.holes[0]).toEqual({ age: 0.5 });
+    step(state, 0.5, first);
+    expect(state.elapsed).toBe(2);
+    expect(state.holes[0]).toBeNull();
+    expect(whack(state, 0)).toBe(0);
+  });
+
+  it('spawns every mole due inside one long step, at its own time', () => {
+    const state = createState();
+    // Spawns are due at 1 s and about 1.98 s; the first expires at 2 s.
+    step(state, 2.5, first);
+    expect(state.holes[0]).toBeNull();
+    expect(state.holes[1]?.age).toBeCloseTo(2.5 - (1 + spawnInterval(1)));
+    expect(state.nextSpawn).toBeCloseTo(
+      1 + spawnInterval(1) + spawnInterval(1 + spawnInterval(1)) - 2.5,
+    );
+  });
+
+  it('ends the same whether time comes in one step or many', () => {
+    const random = () => 0.37;
+    const partitions = [[10], [3, 0.7, 2.2, 4.1], Array.from({ length: 100 }, () => 0.1)];
+    const results = partitions.map((steps) => {
+      const state = createState();
+      for (const dt of steps) step(state, dt, random);
+      return state;
+    });
+    for (const state of results.slice(1)) {
+      expect(state.elapsed).toBeCloseTo(results[0].elapsed);
+      expect(state.nextSpawn).toBeCloseTo(results[0].nextSpawn);
+      expect(state.holes.map((mole) => mole !== null)).toEqual(
+        results[0].holes.map((mole) => mole !== null),
+      );
+      state.holes.forEach((mole, i) => {
+        if (mole) expect(mole.age).toBeCloseTo(results[0].holes[i]!.age);
+      });
+    }
+  });
+
+  it('counts the whole of a slow frame', () => {
+    expect(frameSeconds(null, 500)).toBe(0);
+    expect(frameSeconds(1000, 1100)).toBeCloseTo(0.1);
+    expect(frameSeconds(1000, 3000)).toBe(2);
+    expect(frameSeconds(1000, 900)).toBe(0);
+  });
+
+  it('finishes the round after 30 seconds of slow frames', () => {
+    const state = createState();
+    let last: number | null = null;
+    let frames = 0;
+    // 100 ms frames: the first frame starts the clock, then 300 more cover 30 s.
+    for (let time = 0; frames <= 300; time += 100, frames++) {
+      step(state, frameSeconds(last, time), first);
+      last = time;
+      if (frames < 300) expect(state.phase).toBe('playing');
+    }
+    expect(state.phase).toBe('over');
+    expect(timeLeft(state)).toBe(0);
   });
 
   it('finds the hole under a click', () => {
