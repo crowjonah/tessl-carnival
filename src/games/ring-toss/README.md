@@ -28,8 +28,11 @@ A ring scores when it lands within 12 pixels of the centre of a bottle neck.
 A ring that lands anywhere else is a miss and scores nothing: it costs no points.
 Each shelf is labelled with what its bottles pay, such as `30 pts`.
 
-Where each ring lands, the game shows what it added for 0.8 seconds: `+30`, `+20`
-or `+10` for a hit, or `Miss +0` for a miss. `Score` in the bottom left is your total.
+Where each ring lands, the game shows what it added: `+30`, `+20` or `+10` for a
+hit, or `Miss +0` for a miss. A result fades over 0.8 seconds, but the next ring's
+result replaces it, so if you throw again straight away it lasts only the 0.6 seconds
+that ring is in the air. The last ring's result always gets its full 0.8 seconds.
+`Score` in the bottom left is your total.
 
 | Row    | Points |
 | ------ | ------ |
@@ -37,13 +40,16 @@ or `+10` for a hit, or `Miss +0` for a miss. `Score` in the bottom left is your 
 | Middle | 20     |
 | Front  | 10     |
 
-Your final score is saved to the carnival's score board when the round ends.
+Your final score is saved to the carnival's score board once, as soon as the last
+ring has landed. Leaving for the midway while that last result is showing still saves it.
 
 ## Files
 
 - `game.ts`: the game logic (`createState`, `throwRing`, `step`, `landRing`,
-  `bottleAt`, `swayOffset`, `ringPosition`), the labels the screen shows
-  (`rowLabel`, `landingText`, `ringsLabel`, `isLowRings`) and the `ringToss` entry, the default
-  export the midway finds.
+  `bottleAt`, `swayOffset`, `ringPosition`, `isRoundComplete`), the labels the screen
+  shows (`rowLabel`, `landingText`, `ringsLabel`, `isLowRings`) and the `ringToss`
+  entry, the default export the midway finds.
 - `game.test.ts`: tests for the game logic.
+- `start.test.ts`: tests that `start` saves the score once, including when you leave
+  while the last result shows.
 - `README.md`: this file.

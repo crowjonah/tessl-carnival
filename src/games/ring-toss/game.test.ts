@@ -10,6 +10,7 @@ import {
   bottleAt,
   createState,
   isLowRings,
+  isRoundComplete,
   landRing,
   landingText,
   ringsLabel,
@@ -294,5 +295,18 @@ describe('ring toss', () => {
   it('shows a hit as the points it added and a miss as adding nothing', () => {
     expect(landingText({ points: backRow.points })).toBe(`+${backRow.points}`);
     expect(landingText({ points: 0 })).toBe('Miss +0');
+  });
+
+  it('counts the round as complete once the last ring has landed, not before', () => {
+    const state = createState();
+    throwAllButOne(state);
+    const bottle = bottleIn(state, backRow);
+    state.time = 0;
+    throwRing(state, bottle.x, bottle.y);
+    expect(isRoundComplete(state)).toBe(false);
+    step(state, FLIGHT_TIME);
+    expect(state.phase).toBe('finishing');
+    expect(isRoundComplete(state)).toBe(true);
+    expect(state.score).toBe(backRow.points);
   });
 });

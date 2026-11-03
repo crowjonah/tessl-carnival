@@ -99,6 +99,14 @@ export function landingText(landing: Pick<Landing, 'points'>): string {
   return landing.points > 0 ? `+${landing.points}` : 'Miss +0';
 }
 
+/**
+ * True once the last ring has landed and been scored, which is when the score
+ * is final and saved. That is already true while the last result finishes.
+ */
+export function isRoundComplete(state: RingTossState): boolean {
+  return state.phase !== 'playing';
+}
+
 export function isLowRings(state: RingTossState): boolean {
   return state.rings <= LOW_RINGS;
 }
@@ -347,7 +355,9 @@ export const ringToss: CarnivalGame = {
       const dt = Math.min((time - last) / 1000, 0.05);
       last = time;
       step(state, dt);
-      if (state.phase === 'over' && !scoreRecorded) {
+      // Save as soon as the round is complete, not when the overlay shows, so
+      // leaving during the last result still keeps the score.
+      if (isRoundComplete(state) && !scoreRecorded) {
         recordScore(ringToss.id, state.score);
         scoreRecorded = true;
       }
