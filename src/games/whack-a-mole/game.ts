@@ -7,6 +7,12 @@ export const ROUND_DURATION = 30;
 /** Seconds a mole stays up before it drops back down. */
 export const MOLE_LIFETIME = 1;
 export const POINTS_PER_WHACK = 10;
+/** The scoring rule the HUD shows, built from the points so it can't drift from them. */
+export const REWARD_RULE = `+${POINTS_PER_WHACK} per whack, 0 per miss`;
+/** The timer warns, and the gauge turns red, with this many seconds or fewer left. */
+export const LOW_TIME = 10;
+/** How long a hit's points or a miss stay on screen, in seconds. */
+export const FEEDBACK_TIME = 0.8;
 /** Seconds between pop-ups at the start of the round. */
 export const START_SPAWN_INTERVAL = 1;
 /** Seconds between pop-ups at the end of the round. */
@@ -35,16 +41,28 @@ export interface Bonk {
   age: number;
 }
 
+/** The result of one whack at a hole: its points, or zero for a miss. */
+export interface Feedback {
+  hole: number;
+  points: number;
+  age: number;
+}
+
 export interface WhackAMoleState {
   /** One entry per hole: a mole that is up, or null. */
   holes: (Mole | null)[];
   bonks: Bonk[];
+  feedback: Feedback[];
   /** Seconds since the round started. */
   elapsed: number;
   /** Seconds until the next mole pops up. */
   nextSpawn: number;
   score: number;
-  phase: 'playing' | 'over';
+  /**
+   * `ending` starts when time runs out: nothing scores or spawns, and the last
+   * feedback fades before the round is `over` and the final score shows.
+   */
+  phase: 'playing' | 'ending' | 'over';
 }
 
 /** Picks a number in [0, 1). Tests pass their own to control which hole a mole uses. */
@@ -54,6 +72,7 @@ export function createState(): WhackAMoleState {
   return {
     holes: HOLES.map(() => null),
     bonks: [],
+    feedback: [],
     elapsed: 0,
     nextSpawn: START_SPAWN_INTERVAL,
     score: 0,
@@ -71,6 +90,23 @@ export function timeLeft(state: WhackAMoleState): number {
   return Math.max(ROUND_DURATION - state.elapsed, 0);
 }
 
+/** True in the last LOW_TIME seconds of the round, before time is up. */
+export function isLowTime(state: WhackAMoleState): boolean {
+  const left = timeLeft(state);
+  return left > 0 && left <= LOW_TIME + EPSILON;
+}
+
+/** What the timer shows: a label, whole seconds left out of the round, and the gauge's fill. */
+export function timeReadout(state: WhackAMoleState) {
+  const left = timeLeft(state);
+  return {
+    label: left === 0 ? "Time's up!" : isLowTime(state) ? 'Hurry!' : 'Time',
+    seconds: Math.max(Math.ceil(left - EPSILON), 0),
+    total: ROUND_DURATION,
+    fraction: left / ROUND_DURATION,
+  };
+}
+
 /** Pops a mole up in a random empty hole. Returns the hole, or -1 if every hole is taken. */
 export function spawnMole(state: WhackAMoleState, random: Random = Math.random): number {
   const empty = state.holes.flatMap((mole, i) => (mole ? [] : [i]));
@@ -80,15 +116,22 @@ export function spawnMole(state: WhackAMoleState, random: Random = Math.random):
   return hole;
 }
 
-/** Whacks the mole in a hole. Returns the points scored: zero for an empty hole or after the round. */
+/**
+ * Whacks the mole in a hole. Returns the points scored: zero for an empty
+ * hole or after the round. While the round is on, every whack shows its
+ * result at the hole, replacing any earlier one there; after it, nothing changes.
+ */
 export function whack(state: WhackAMoleState, hole: number): number {
   if (state.phase !== 'playing') return 0;
   const mole = state.holes[hole];
-  if (!mole || mole.age >= MOLE_LIFETIME) return 0;
+  const points = mole && mole.age < MOLE_LIFETIME ? POINTS_PER_WHACK : 0;
+  state.feedback = state.feedback.filter((f) => f.hole !== hole);
+  state.feedback.push({ hole, points, age: 0 });
+  if (points === 0) return 0;
   state.holes[hole] = null;
   state.bonks.push({ hole, age: 0 });
-  state.score += POINTS_PER_WHACK;
-  return POINTS_PER_WHACK;
+  state.score += points;
+  return points;
 }
 
 /** The hole under a point on the canvas, or -1 for none. */
@@ -96,13 +139,19 @@ export function holeAt(x: number, y: number): number {
   return HOLES.findIndex((h) => Math.hypot(x - h.x, y - h.y) <= HOLE_RADIUS);
 }
 
-/** Ages the moles and bonks by `dt` seconds, with no spawn due inside it. */
+/** Ages the bonks and feedback by `dt` seconds, dropping the ones that have faded. */
+function ageEffects(state: WhackAMoleState, dt: number): void {
+  for (const bonk of state.bonks) bonk.age += dt;
+  state.bonks = state.bonks.filter((b) => b.age < BONK_TIME);
+  for (const f of state.feedback) f.age += dt;
+  state.feedback = state.feedback.filter((f) => f.age < FEEDBACK_TIME);
+}
+
+/** Ages the moles and effects by `dt` seconds, with no spawn due inside it. */
 function advance(state: WhackAMoleState, dt: number): void {
   state.elapsed += dt;
   state.nextSpawn -= dt;
-
-  for (const bonk of state.bonks) bonk.age += dt;
-  state.bonks = state.bonks.filter((b) => b.age < BONK_TIME);
+  ageEffects(state, dt);
 
   state.holes = state.holes.map((mole) => {
     if (!mole) return null;
@@ -114,12 +163,18 @@ function advance(state: WhackAMoleState, dt: number): void {
 /**
  * Advances the round by `dt` seconds. Spawns and expiries happen in order at
  * their own moment inside the step, so one long step and several short ones
- * covering the same time end the same way. Time past the end of the round is
- * ignored.
+ * covering the same time end the same way. Time past the end of the round
+ * only fades the last feedback: it scores and spawns nothing. The round is
+ * over once that feedback has faded.
  */
 export function step(state: WhackAMoleState, dt: number, random: Random = Math.random): void {
-  if (state.phase !== 'playing') return;
+  if (state.phase === 'over') return;
+  if (state.phase === 'ending') {
+    finish(state, dt);
+    return;
+  }
   const endsRound = dt >= timeLeft(state) - EPSILON;
+  const overshoot = Math.max(dt - timeLeft(state), 0);
   let remaining = Math.min(dt, timeLeft(state));
 
   while (remaining > EPSILON) {
@@ -134,9 +189,16 @@ export function step(state: WhackAMoleState, dt: number, random: Random = Math.r
 
   if (endsRound) {
     state.elapsed = ROUND_DURATION;
-    state.phase = 'over';
+    state.phase = 'ending';
     state.holes = state.holes.map(() => null);
+    finish(state, overshoot);
   }
+}
+
+/** Fades the effects after time is up, and ends the round once they are gone. */
+function finish(state: WhackAMoleState, dt: number): void {
+  ageEffects(state, dt);
+  if (state.bonks.length === 0 && state.feedback.length === 0) state.phase = 'over';
 }
 
 /**
@@ -209,12 +271,26 @@ function draw(ctx: CanvasRenderingContext2D, state: WhackAMoleState) {
   }
   ctx.globalAlpha = 1;
 
+  // Each whack's result floats up above its hole, clear of the mole.
+  ctx.font = canvasFont('body', 'bold');
+  ctx.textAlign = 'center';
+  for (const f of state.feedback) {
+    const hole = HOLES[f.hole];
+    ctx.globalAlpha = 1 - f.age / FEEDBACK_TIME;
+    ctx.fillStyle = f.points > 0 ? colors.accent : colors.muted;
+    const text = f.points > 0 ? `+${f.points}` : 'Miss 0';
+    ctx.fillText(text, hole.x, hole.y - 64 - f.age * 24);
+  }
+  ctx.globalAlpha = 1;
+
+  ctx.fillStyle = colors.muted;
+  ctx.font = canvasFont('small', 'bold');
+  ctx.textAlign = 'left';
+  ctx.fillText(REWARD_RULE, 16, HEIGHT - 46);
   ctx.fillStyle = colors.text;
   ctx.font = canvasFont('body', 'bold');
-  ctx.textAlign = 'left';
   ctx.fillText(`Score ${state.score}`, 16, HEIGHT - 20);
-  ctx.textAlign = 'right';
-  ctx.fillText(`Time ${Math.ceil(timeLeft(state))}s`, WIDTH - 16, HEIGHT - 20);
+  drawTimer(ctx, state);
 
   if (state.phase === 'over') {
     ctx.fillStyle = colors.background;
@@ -229,6 +305,29 @@ function draw(ctx: CanvasRenderingContext2D, state: WhackAMoleState) {
     ctx.font = canvasFont('body');
     ctx.fillText('Click to play again', WIDTH / 2, HEIGHT / 2 + 40);
   }
+}
+
+/** The timer: seconds left out of the round, over a gauge that empties as time runs out. */
+function drawTimer(ctx: CanvasRenderingContext2D, state: WhackAMoleState) {
+  const { colors } = theme;
+  const readout = timeReadout(state);
+  const warn = readout.seconds === 0 || isLowTime(state);
+  const right = WIDTH - 16;
+  const width = 180;
+  const top = HEIGHT - 58;
+
+  ctx.textAlign = 'right';
+  ctx.font = canvasFont('body', 'bold');
+  ctx.fillStyle = warn ? colors.danger : colors.text;
+  ctx.fillText(`${readout.label} ${readout.seconds}s / ${readout.total}s`, right, HEIGHT - 20);
+
+  ctx.fillStyle = colors.surface;
+  ctx.fillRect(right - width, top, width, 14);
+  ctx.fillStyle = warn ? colors.danger : colors.brand;
+  ctx.fillRect(right - width, top, width * readout.fraction, 14);
+  // A notch marks where the warning starts, so the gauge reads without colour.
+  ctx.fillStyle = colors.text;
+  ctx.fillRect(right - width + width * (LOW_TIME / ROUND_DURATION) - 1, top - 3, 2, 20);
 }
 
 export const whackAMole: CarnivalGame = {

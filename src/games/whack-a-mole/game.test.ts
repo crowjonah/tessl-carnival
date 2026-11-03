@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   END_SPAWN_INTERVAL,
+  FEEDBACK_TIME,
+  LOW_TIME,
+  REWARD_RULE,
   HOLES,
   HOLE_RADIUS,
   MOLE_LIFETIME,
@@ -10,10 +13,12 @@ import {
   createState,
   frameSeconds,
   holeAt,
+  isLowTime,
   spawnInterval,
   spawnMole,
   step,
   timeLeft,
+  timeReadout,
   whack,
 } from './game';
 
@@ -158,6 +163,7 @@ describe('whack-a-mole', () => {
     expect(fresh).toEqual({
       holes: HOLES.map(() => null),
       bonks: [],
+      feedback: [],
       elapsed: 0,
       nextSpawn: START_SPAWN_INTERVAL,
       score: 0,
@@ -232,5 +238,152 @@ describe('whack-a-mole', () => {
     expect(holeAt(HOLES[4].x, HOLES[4].y)).toBe(4);
     expect(holeAt(HOLES[0].x + HOLE_RADIUS, HOLES[0].y)).toBe(0);
     expect(holeAt(0, 0)).toBe(-1);
+  });
+
+  describe('feedback', () => {
+    it('shows the reward rule from the points a whack scores', () => {
+      expect(REWARD_RULE).toBe(`+${POINTS_PER_WHACK} per whack, 0 per miss`);
+    });
+
+    it('shows a hit with its points, once', () => {
+      const state = createState();
+      spawnMole(state, first);
+      whack(state, 0);
+      expect(state.feedback).toEqual([{ hole: 0, points: POINTS_PER_WHACK, age: 0 }]);
+      expect(state.score).toBe(POINTS_PER_WHACK);
+    });
+
+    it('shows a miss as zero points, with no penalty', () => {
+      const state = createState();
+      spawnMole(state, first);
+      whack(state, 0);
+      whack(state, 0);
+      whack(state, 3);
+      expect(state.feedback).toEqual([
+        { hole: 0, points: 0, age: 0 },
+        { hole: 3, points: 0, age: 0 },
+      ]);
+      expect(state.score).toBe(POINTS_PER_WHACK);
+    });
+
+    it('keeps feedback on screen for its full lifetime, then drops it', () => {
+      const state = createState();
+      whack(state, 3);
+      step(state, FEEDBACK_TIME - 0.01, last);
+      expect(state.feedback).toHaveLength(1);
+      expect(state.feedback[0].age).toBeCloseTo(FEEDBACK_TIME - 0.01);
+      step(state, 0.01, last);
+      expect(state.feedback).toHaveLength(0);
+    });
+
+    it('shows the last hit in full before the round is over, without extra playing time', () => {
+      const state = createState();
+      step(state, ROUND_DURATION - 0.1, last);
+      state.holes[4] = { age: 0 };
+      whack(state, 4);
+      const score = state.score;
+
+      step(state, 0.1, first);
+      expect(state.phase).toBe('ending');
+      expect(state.elapsed).toBe(ROUND_DURATION);
+      expect(timeLeft(state)).toBe(0);
+      expect(state.feedback).toHaveLength(1);
+
+      // Nothing scores or spawns while the last feedback fades.
+      state.holes[2] = { age: 0 };
+      expect(whack(state, 2)).toBe(0);
+      state.holes[2] = null;
+      expect(state.feedback).toHaveLength(1);
+      step(state, FEEDBACK_TIME - 0.1 - 0.01, first);
+      expect(state.phase).toBe('ending');
+      expect(state.holes.every((mole) => mole === null)).toBe(true);
+      expect(state.elapsed).toBe(ROUND_DURATION);
+
+      step(state, 0.01, first);
+      expect(state.phase).toBe('over');
+      expect(state.score).toBe(score);
+      expect(state.feedback).toHaveLength(0);
+    });
+
+    it('ends the scoring window at the same moment however large the step', () => {
+      for (const dt of [0.5, 5, 60]) {
+        const state = createState();
+        step(state, ROUND_DURATION - 0.2, last);
+        whack(state, 0);
+        step(state, dt, first);
+        expect(state.elapsed).toBe(ROUND_DURATION);
+        expect(state.phase).toBe(dt >= FEEDBACK_TIME ? 'over' : 'ending');
+        expect(state.holes.every((mole) => mole === null)).toBe(true);
+      }
+      const short = createState();
+      step(short, ROUND_DURATION - 0.2, last);
+      step(short, 0.1, first);
+      expect(short.phase).toBe('playing');
+      expect(timeLeft(short)).toBeCloseTo(0.1);
+    });
+
+    it('ignores input after the round, and changes nothing', () => {
+      const state = createState();
+      step(state, ROUND_DURATION, first);
+      expect(state.phase).toBe('over');
+      state.holes[1] = { age: 0 };
+      expect(whack(state, 1)).toBe(0);
+      expect(whack(state, 5)).toBe(0);
+      expect(state.feedback).toEqual([]);
+      expect(state.bonks).toEqual([]);
+      expect(state.score).toBe(0);
+    });
+
+    it('starts a replay with the full time budget and no feedback', () => {
+      const played = createState();
+      step(played, ROUND_DURATION - 0.1, last);
+      whack(played, 0);
+      step(played, 5, first);
+      expect(played.phase).toBe('over');
+
+      const fresh = createState();
+      expect(fresh.feedback).toEqual([]);
+      expect(isLowTime(fresh)).toBe(false);
+      expect(timeReadout(fresh)).toEqual({
+        label: 'Time',
+        seconds: ROUND_DURATION,
+        total: ROUND_DURATION,
+        fraction: 1,
+      });
+    });
+  });
+
+  describe('time budget', () => {
+    it('agrees with the gauge at the start, around the warning and at zero', () => {
+      const state = createState();
+      expect(timeReadout(state)).toMatchObject({
+        label: 'Time',
+        seconds: 30,
+        total: 30,
+        fraction: 1,
+      });
+
+      step(state, ROUND_DURATION - LOW_TIME - 0.5, last);
+      expect(isLowTime(state)).toBe(false);
+      expect(timeReadout(state)).toMatchObject({ label: 'Time', seconds: LOW_TIME + 1 });
+      expect(timeReadout(state).fraction).toBeCloseTo((LOW_TIME + 0.5) / ROUND_DURATION);
+
+      step(state, 0.5, last);
+      expect(isLowTime(state)).toBe(true);
+      expect(timeReadout(state)).toMatchObject({ label: 'Hurry!', seconds: LOW_TIME });
+      expect(timeReadout(state).fraction).toBeCloseTo(LOW_TIME / ROUND_DURATION);
+
+      step(state, LOW_TIME - 0.5, last);
+      expect(timeReadout(state)).toMatchObject({ label: 'Hurry!', seconds: 1 });
+
+      step(state, 0.5, last);
+      expect(isLowTime(state)).toBe(false);
+      expect(timeReadout(state)).toEqual({
+        label: "Time's up!",
+        seconds: 0,
+        total: ROUND_DURATION,
+        fraction: 0,
+      });
+    });
   });
 });
