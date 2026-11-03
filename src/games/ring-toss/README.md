@@ -12,13 +12,24 @@ Land rings on the bottle necks before you run out. Bottles farther back score mo
   rings onto a bottle.
 - To score, aim the swaying white circle at a bottle neck. A ring that lands on the
   foul line, between bottles or outside the bottle rows scores nothing.
-- You have 8 rings. The round ends when the last ring has landed.
-- Click again on the game over screen to play another round.
+- You have 8 rings. The gauge in the bottom right shows one ring per ring left,
+  beside a `Rings 8/8` counter. A throw uses one ring as soon as it leaves your hand;
+  a click that can't throw, such as one while a ring is in the air, uses nothing.
+  A thrown ring shows as a thin grey outline.
+- At 2 rings or fewer the gauge turns red and the counter reads `Low rings!`.
+  At 0 it reads `No rings left`.
+- The round ends when the last ring has landed and its result has stayed on screen
+  for its full 0.8 seconds. You can't throw while that last result is showing.
+- Click again on the game over screen to play another round with all 8 rings.
 
 ## Scoring
 
 A ring scores when it lands within 12 pixels of the centre of a bottle neck.
-A ring that lands anywhere else is a miss and scores nothing.
+A ring that lands anywhere else is a miss and scores nothing: it costs no points.
+Each shelf is labelled with what its bottles pay, such as `30 pts`.
+
+Where each ring lands, the game shows what it added for 0.8 seconds: `+30`, `+20`
+or `+10` for a hit, or `Miss +0` for a miss. `Score` in the bottom left is your total.
 
 | Row    | Points |
 | ------ | ------ |
@@ -31,7 +42,8 @@ Your final score is saved to the carnival's score board when the round ends.
 ## Files
 
 - `game.ts`: the game logic (`createState`, `throwRing`, `step`, `landRing`,
-  `bottleAt`, `swayOffset`, `ringPosition`) and the `ringToss` entry, the default
+  `bottleAt`, `swayOffset`, `ringPosition`), the labels the screen shows
+  (`rowLabel`, `landingText`, `ringsLabel`, `isLowRings`) and the `ringToss` entry, the default
   export the midway finds.
 - `game.test.ts`: tests for the game logic.
 - `README.md`: this file.

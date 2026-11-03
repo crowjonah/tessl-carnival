@@ -2,12 +2,18 @@ import { describe, expect, it } from 'vitest';
 import {
   FLIGHT_TIME,
   FOUL_LINE,
+  LOW_RINGS,
   NECK_RADIUS,
+  RESULT_TIME,
   RINGS_PER_ROUND,
   ROWS,
   bottleAt,
   createState,
+  isLowRings,
   landRing,
+  landingText,
+  ringsLabel,
+  rowLabel,
   ringPosition,
   step,
   swayOffset,
@@ -29,6 +35,17 @@ function tossAndLand(state: RingTossState, x: number, y: number) {
   state.time = 0;
   expect(throwRing(state, x, y)).toBe(true);
   step(state, FLIGHT_TIME);
+}
+
+/** Throws every ring but the last as a miss. */
+function throwAllButOne(state: RingTossState) {
+  for (let i = 0; i < RINGS_PER_ROUND - 1; i++) tossAndLand(state, 0, 0);
+}
+
+/** Plays a whole round of misses and lets the last result fade. */
+function playOut(state: RingTossState) {
+  for (let i = 0; i < RINGS_PER_ROUND; i++) tossAndLand(state, 0, 0);
+  step(state, RESULT_TIME);
 }
 
 describe('ring toss', () => {
@@ -146,12 +163,74 @@ describe('ring toss', () => {
     expect(state.phase).toBe('playing');
     step(state, FLIGHT_TIME / 2);
     expect(state.score).toBe(backRow.points);
+    expect(state.phase).not.toBe('playing');
+  });
+
+  it('keeps the final landing on screen before the round is over', () => {
+    const state = createState();
+    for (let i = 0; i < RINGS_PER_ROUND - 1; i++) tossAndLand(state, 0, 0);
+    const bottle = bottleIn(state, backRow);
+    tossAndLand(state, bottle.x, bottle.y);
+    expect(state.lastLanding).toMatchObject({ points: backRow.points, age: 0 });
+    expect(state.phase).not.toBe('over');
+  });
+
+  it('shows a final hit for the full result time before the round is over', () => {
+    const state = createState();
+    throwAllButOne(state);
+    const bottle = bottleIn(state, backRow);
+    tossAndLand(state, bottle.x, bottle.y);
+    expect(state.phase).toBe('finishing');
+    step(state, RESULT_TIME - 0.01);
+    expect(state.phase).toBe('finishing');
+    step(state, 0.01);
     expect(state.phase).toBe('over');
+    expect(state.score).toBe(backRow.points);
+  });
+
+  it('shows a final miss for the full result time before the round is over', () => {
+    const state = createState();
+    throwAllButOne(state);
+    tossAndLand(state, 0, 0);
+    expect(state.lastLanding?.points).toBe(0);
+    expect(state.phase).toBe('finishing');
+    step(state, RESULT_TIME / 2);
+    expect(state.phase).toBe('finishing');
+    step(state, RESULT_TIME / 2);
+    expect(state.phase).toBe('over');
+    expect(state.score).toBe(0);
+  });
+
+  it('still shows the final result when one large step lands the last ring', () => {
+    const state = createState();
+    throwAllButOne(state);
+    const bottle = bottleIn(state, backRow);
+    state.time = 0;
+    throwRing(state, bottle.x, bottle.y);
+    step(state, 10);
+    expect(state.lastLanding).toMatchObject({ points: backRow.points, age: 0 });
+    expect(state.phase).toBe('finishing');
+    step(state, 10);
+    expect(state.phase).toBe('over');
+    expect(state.score).toBe(backRow.points);
+  });
+
+  it('throws nothing and scores nothing while the last result finishes', () => {
+    const state = createState();
+    throwAllButOne(state);
+    const bottle = bottleIn(state, backRow);
+    tossAndLand(state, bottle.x, bottle.y);
+    expect(state.phase).toBe('finishing');
+    expect(throwRing(state, bottle.x, bottle.y)).toBe(false);
+    state.rings = 1;
+    expect(throwRing(state, bottle.x, bottle.y)).toBe(false);
+    expect(state.ring).toBeNull();
+    expect(state.score).toBe(backRow.points);
   });
 
   it('ignores throws and steps once the round is over', () => {
     const state = createState();
-    for (let i = 0; i < RINGS_PER_ROUND; i++) tossAndLand(state, 0, 0);
+    playOut(state);
     expect(state.phase).toBe('over');
     const bottle = bottleIn(state, backRow);
     state.rings = 1;
@@ -161,14 +240,59 @@ describe('ring toss', () => {
     expect(state.phase).toBe('over');
   });
 
-  it('resets the rings and the score for a fresh round', () => {
+  it('resets the rings, score, result and warning for a fresh round', () => {
     const played = createState();
-    const bottle = bottleIn(played, backRow);
-    tossAndLand(played, bottle.x, bottle.y);
+    playOut(played);
+    expect(isLowRings(played)).toBe(true);
     const fresh = createState();
     expect(fresh.rings).toBe(RINGS_PER_ROUND);
     expect(fresh.score).toBe(0);
     expect(fresh.ring).toBeNull();
+    expect(fresh.lastLanding).toBeNull();
     expect(fresh.phase).toBe('playing');
+    expect(isLowRings(fresh)).toBe(false);
+    expect(ringsLabel(fresh)).toBe('Rings');
+  });
+
+  it('does not use a ring for a throw that is turned down', () => {
+    const state = createState();
+    throwRing(state, 400, 200);
+    expect(throwRing(state, 400, 200)).toBe(false);
+    expect(throwRing(state, 400, 200)).toBe(false);
+    expect(state.rings).toBe(RINGS_PER_ROUND - 1);
+    step(state, FLIGHT_TIME);
+    expect(state.score).toBe(state.lastLanding?.points);
+  });
+
+  it('warns at LOW_RINGS or fewer, and says when no rings are left', () => {
+    const state = createState();
+    expect(ringsLabel(state)).toBe('Rings');
+    state.rings = LOW_RINGS + 1;
+    expect(isLowRings(state)).toBe(false);
+    expect(ringsLabel(state)).toBe('Rings');
+    for (let rings = LOW_RINGS; rings >= 1; rings--) {
+      state.rings = rings;
+      expect(isLowRings(state)).toBe(true);
+      expect(ringsLabel(state)).toBe('Low rings!');
+    }
+    state.rings = 0;
+    expect(isLowRings(state)).toBe(true);
+    expect(ringsLabel(state)).toBe('No rings left');
+  });
+
+  it('labels each row with the points it pays', () => {
+    expect(ROWS.map(rowLabel)).toEqual(ROWS.map((row) => `${row.points} pts`));
+    for (const row of ROWS) {
+      const fresh = createState();
+      const bottle = bottleIn(fresh, row);
+      tossAndLand(fresh, bottle.x, bottle.y);
+      expect(fresh.score).toBe(row.points);
+      expect(rowLabel(row)).toBe(`${fresh.score} pts`);
+    }
+  });
+
+  it('shows a hit as the points it added and a miss as adding nothing', () => {
+    expect(landingText({ points: backRow.points })).toBe(`+${backRow.points}`);
+    expect(landingText({ points: 0 })).toBe('Miss +0');
   });
 });
