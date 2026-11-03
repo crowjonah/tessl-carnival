@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   CASTS_PER_ROUND,
   CAST_TIME,
@@ -19,13 +19,22 @@ import {
   duckUnderHook,
   isCatchShowing,
   isLowOnCasts,
+  isRoundComplete,
   moveDucks,
   resolveCast,
+  scoreRecorder,
   step,
   streamPoint,
   wrapAngle,
   type HookADuckState,
 } from './game';
+import hookADuck from './game';
+
+const recordScore = vi.hoisted(() => vi.fn());
+vi.mock('../../carnival', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../carnival')>()),
+  recordScore,
+}));
 
 const SPACING = (Math.PI * 2) / DUCK_NUMBERS.length;
 /** Duck 7 carries the 50. */
@@ -360,5 +369,121 @@ describe('hook a duck', () => {
     expect(fresh.cast).toBeNull();
     expect(fresh.lastCatch).toBeNull();
     expect(fresh.phase).toBe('playing');
+  });
+
+  it('counts the round complete once the last cast is back up, before its catch fades', () => {
+    const state = createState();
+    for (let i = 0; i < CASTS_PER_ROUND - 1; i++) {
+      lineUpMissAtDip(state);
+      castAndFade(state);
+    }
+    lineUpAtDip(state, BIG_DUCK);
+    expect(castHook(state)).toBe(true);
+    step(state, DIP_TIME);
+    expect(isRoundComplete(state)).toBe(false);
+    step(state, CAST_TIME - DIP_TIME);
+    expect(isRoundComplete(state)).toBe(true);
+    expect(isCatchShowing(state)).toBe(true);
+    expect(state.phase).toBe('playing');
+  });
+
+  it('records the score once, as soon as the round is complete', () => {
+    const record = vi.fn();
+    const save = scoreRecorder(record);
+    const state = createState();
+    for (let i = 0; i < CASTS_PER_ROUND - 1; i++) {
+      lineUpMissAtDip(state);
+      castAndFade(state);
+      save(state);
+    }
+    lineUpAtDip(state, BIG_DUCK);
+    castHook(state);
+    step(state, DIP_TIME);
+    save(state);
+    expect(record).not.toHaveBeenCalled();
+    step(state, CAST_TIME - DIP_TIME);
+    save(state);
+    expect(record).toHaveBeenCalledExactlyOnceWith(50);
+    step(state, CATCH_TIME);
+    expect(state.phase).toBe('over');
+    save(state);
+    expect(record).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('hook a duck start', () => {
+  let frame: FrameRequestCallback | null = null;
+  let now = 0;
+  let onDown: () => void = () => {};
+
+  function startGame() {
+    const ctx = new Proxy({}, { get: () => () => ({}), set: () => true });
+    const canvas = {
+      getContext: () => ctx,
+      addEventListener: (type: string, listener: () => void) => {
+        if (type === 'pointerdown') onDown = listener;
+      },
+      removeEventListener: () => {},
+    };
+    vi.stubGlobal('window', { addEventListener: () => {}, removeEventListener: () => {} });
+    vi.stubGlobal('performance', { now: () => now });
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frame = callback;
+      return 1;
+    });
+    vi.stubGlobal('cancelAnimationFrame', () => {
+      frame = null;
+    });
+    return hookADuck.start(canvas as unknown as HTMLCanvasElement);
+  }
+
+  /** Runs the animation loop for `seconds`, in 50 ms frames. */
+  function run(seconds: number) {
+    for (let t = 0; t < seconds - 1e-9; t += 0.05) {
+      now += 50;
+      frame?.(now);
+    }
+  }
+
+  /** Makes every cast in the round and runs until the last one is back up. */
+  function castAll() {
+    for (let i = 0; i < CASTS_PER_ROUND; i++) {
+      onDown();
+      run(CAST_TIME + 0.05);
+    }
+  }
+
+  afterEach(() => {
+    recordScore.mockClear();
+    vi.unstubAllGlobals();
+    frame = null;
+    now = 0;
+  });
+
+  it('saves the completed score when you leave during the final feedback', () => {
+    const stop = startGame();
+    castAll();
+    stop();
+    expect(recordScore).toHaveBeenCalledExactlyOnceWith('hook-a-duck', expect.any(Number));
+  });
+
+  it('saves nothing when you leave while the last cast is still down', () => {
+    const stop = startGame();
+    for (let i = 0; i < CASTS_PER_ROUND - 1; i++) {
+      onDown();
+      run(CAST_TIME + 0.05);
+    }
+    onDown();
+    run(DIP_TIME);
+    stop();
+    expect(recordScore).not.toHaveBeenCalled();
+  });
+
+  it('saves the score exactly once when the round runs to the game over screen', () => {
+    const stop = startGame();
+    castAll();
+    run(CATCH_TIME + 0.1);
+    stop();
+    expect(recordScore).toHaveBeenCalledTimes(1);
   });
 });

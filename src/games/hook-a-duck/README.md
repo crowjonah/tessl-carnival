@@ -26,8 +26,11 @@ moment the hook reaches the water. If two ducks are that close, the nearer one i
 Otherwise the cast is a miss and scores nothing.
 
 The caught duck's base number is shown over the hook with `+<number> pts`, and that number
-is added to your score once. A miss shows `Miss` and `+0 pts`. Either stays on screen for
-1.2 seconds. The duck stays in the stream, so you can catch it again on a later cast.
+is added to your score once. A miss shows `Miss` and `+0 pts`. Either shows for up to 1.2
+seconds, but the next cast's catch or miss replaces it. Casting again as soon as the hook is
+back up does that after about 0.8 seconds. Only the last cast's catch or miss is sure to
+stay for the full 1.2 seconds. The duck stays in the stream, so you can catch it again on a
+later cast.
 
 A duck's number stays hidden until you catch it. The payout legend in the top left lists
 every number a duck can carry, `5 · 10 · 20 · 50 pts`, without saying which duck has which.
@@ -40,13 +43,14 @@ There are 8 ducks, evenly spaced round the loop, with these numbers on their bas
 | 1     | 20     |
 | 1     | 50     |
 
-Your final score is saved to the carnival's score board when the round ends.
+Your final score is saved to the carnival's score board once, as soon as the last cast is
+back up, so it is saved even if you leave for the midway before the game over screen shows.
 
 ## Files
 
 - `game.ts`: the game logic (`createState`, `castHook`, `resolveCast`, `step`,
   `moveDucks`, `duckUnderHook`, `duckAngle`, `streamPoint`, `wrapAngle`, `castGauge`,
-  `isLowOnCasts`, `isCatchShowing`) and the
+  `isLowOnCasts`, `isCatchShowing`, `isRoundComplete`, `scoreRecorder`) and the
   `hookADuck` entry, the default export the midway finds.
 - `game.test.ts`: tests for the game logic.
 - `README.md`: this file.

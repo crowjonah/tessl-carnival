@@ -183,6 +183,26 @@ export function step(state: HookADuckState, dt: number): void {
   if (state.casts === 0 && !state.cast && !isCatchShowing(state)) state.phase = 'over';
 }
 
+/** Whether every cast is made and back up, so the score can't change any more. */
+export function isRoundComplete(state: HookADuckState): boolean {
+  return state.casts === 0 && !state.cast;
+}
+
+/**
+ * Returns a function that records the round's score once, the first time it
+ * sees the round complete. That is as soon as the last cast is back up, not
+ * when the game over screen shows, so leaving during the final catch or miss
+ * still saves the score.
+ */
+export function scoreRecorder(record: (score: number) => void): (state: HookADuckState) => void {
+  let recorded = false;
+  return (state) => {
+    if (recorded || !isRoundComplete(state)) return;
+    record(state.score);
+    recorded = true;
+  };
+}
+
 /** How far the hook has dropped, from 0 (up) to 1 (in the water). */
 function hookDepth(cast: Cast | null): number {
   if (!cast) return 0;
@@ -373,13 +393,14 @@ export const hookADuck: CarnivalGame = {
     canvas.width = WIDTH;
     canvas.height = HEIGHT;
 
+    const newRecorder = () => scoreRecorder((score) => recordScore(hookADuck.id, score));
     let state = createState();
-    let scoreRecorded = false;
+    let saveScore = newRecorder();
 
     const act = () => {
       if (state.phase === 'over') {
         state = createState();
-        scoreRecorded = false;
+        saveScore = newRecorder();
       } else {
         castHook(state);
       }
@@ -400,10 +421,7 @@ export const hookADuck: CarnivalGame = {
       const dt = Math.min((time - last) / 1000, 0.05);
       last = time;
       step(state, dt);
-      if (state.phase === 'over' && !scoreRecorded) {
-        recordScore(hookADuck.id, state.score);
-        scoreRecorded = true;
-      }
+      saveScore(state);
       draw(ctx, state);
       frame = requestAnimationFrame(loop);
     };
@@ -411,6 +429,7 @@ export const hookADuck: CarnivalGame = {
 
     return () => {
       cancelAnimationFrame(frame);
+      saveScore(state);
       canvas.removeEventListener('pointerdown', onDown);
       window.removeEventListener('keydown', onKey);
     };
