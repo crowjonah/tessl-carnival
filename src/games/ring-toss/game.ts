@@ -3,6 +3,10 @@ import { canvasFont, recordScore, theme, type CarnivalGame } from '../../carniva
 const { width: WIDTH, height: HEIGHT } = theme.canvas;
 
 export const RINGS_PER_ROUND = 8;
+/** Rings count as low, and the gauge turns red with a warning, at this many or fewer. */
+export const LOW_RINGS = 2;
+/** How long a landing's points or miss stay on screen, in seconds. */
+export const RESULT_TIME = 0.8;
 /** Seconds a ring spends in the air. */
 export const FLIGHT_TIME = 0.6;
 /** A ring scores when it lands this close to the centre of a bottle neck. */
@@ -56,7 +60,8 @@ export interface RingTossState {
   /** Seconds since the round started, which drives the sway. */
   time: number;
   lastLanding: Landing | null;
-  phase: 'playing' | 'over';
+  /** `finishing` shows the last landing's result before the round is over. */
+  phase: 'playing' | 'finishing' | 'over';
 }
 
 export function createState(): RingTossState {
@@ -84,6 +89,34 @@ export function swayOffset(time: number): number {
   return SWAY * Math.sin(time * SWAY_SPEED);
 }
 
+/** A row's reward as its shelf label shows it, e.g. `30 pts`. */
+export function rowLabel(row: { points: number }): string {
+  return `${row.points} pts`;
+}
+
+/** What a landing shows: the points it added, or a miss that added nothing. */
+export function landingText(landing: Pick<Landing, 'points'>): string {
+  return landing.points > 0 ? `+${landing.points}` : 'Miss +0';
+}
+
+/**
+ * True once the last ring has landed and been scored, which is when the score
+ * is final and saved. That is already true while the last result finishes.
+ */
+export function isRoundComplete(state: RingTossState): boolean {
+  return state.phase !== 'playing';
+}
+
+export function isLowRings(state: RingTossState): boolean {
+  return state.rings <= LOW_RINGS;
+}
+
+/** The word beside the ring counter: a warning when low, and a plain empty state at zero. */
+export function ringsLabel(state: RingTossState): string {
+  if (state.rings === 0) return 'No rings left';
+  return isLowRings(state) ? 'Low rings!' : 'Rings';
+}
+
 /** The bottle whose neck a ring landing at (x, y) rings, if any. */
 export function bottleAt(bottles: readonly Bottle[], x: number, y: number): Bottle | undefined {
   return bottles.find((b) => Math.hypot(x - b.x, y - b.y) <= NECK_RADIUS);
@@ -91,7 +124,8 @@ export function bottleAt(bottles: readonly Bottle[], x: number, y: number): Bott
 
 /**
  * Throws one ring towards the aim, shifted by the hand's sway. Returns false,
- * and uses no ring, while a ring is in the air or once the round is over.
+ * and uses no ring, while a ring is in the air, once the rings run out, or
+ * while the last landing finishes.
  */
 export function throwRing(state: RingTossState, aimX: number, aimY: number): boolean {
   if (state.phase !== 'playing' || state.ring || state.rings === 0) return false;
@@ -130,12 +164,18 @@ export function landRing(state: RingTossState): void {
 export function step(state: RingTossState, dt: number): void {
   if (state.phase === 'over') return;
   state.time += dt;
+  // Age the last landing before this step's landing, so a new landing gets
+  // the full RESULT_TIME on screen.
   if (state.lastLanding) state.lastLanding.age += dt;
   if (state.ring) {
     state.ring.age += dt;
     if (state.ring.age >= FLIGHT_TIME) landRing(state);
   }
-  if (state.rings === 0 && !state.ring) state.phase = 'over';
+  if (state.rings > 0 || state.ring) return;
+  // The round ends once the last ring has landed and its result has faded,
+  // so the final score never covers the last landing.
+  const showing = state.lastLanding && state.lastLanding.age < RESULT_TIME;
+  state.phase = showing ? 'finishing' : 'over';
 }
 
 function draw(ctx: CanvasRenderingContext2D, state: RingTossState, aim: { x: number; y: number }) {
@@ -155,10 +195,10 @@ function draw(ctx: CanvasRenderingContext2D, state: RingTossState, aim: { x: num
   for (const row of ROWS) {
     ctx.fillStyle = colors.wood;
     ctx.fillRect(40, row.y + 46, WIDTH - 80, 8);
-    ctx.fillStyle = colors.muted;
+    ctx.fillStyle = colors.accent;
     ctx.font = canvasFont('small', 'bold');
     ctx.textAlign = 'left';
-    ctx.fillText(`${row.points}`, 8, row.y + 40);
+    ctx.fillText(rowLabel(row), 8, row.y + 40);
   }
   for (const bottle of state.bottles) {
     ctx.fillStyle = colors.water;
@@ -195,16 +235,12 @@ function draw(ctx: CanvasRenderingContext2D, state: RingTossState, aim: { x: num
   }
 
   const landing = state.lastLanding;
-  if (landing && landing.age < 0.8) {
-    ctx.globalAlpha = 1 - landing.age / 0.8;
+  if (landing && landing.age < RESULT_TIME) {
+    ctx.globalAlpha = 1 - landing.age / RESULT_TIME;
     ctx.fillStyle = landing.points > 0 ? colors.accent : colors.danger;
     ctx.font = canvasFont('body', 'bold');
     ctx.textAlign = 'center';
-    ctx.fillText(
-      landing.points > 0 ? `+${landing.points}` : 'Miss',
-      landing.x,
-      landing.y - 20 - landing.age * 30,
-    );
+    ctx.fillText(landingText(landing), landing.x, landing.y - 20 - landing.age * 30);
     ctx.globalAlpha = 1;
   }
 
@@ -232,8 +268,7 @@ function draw(ctx: CanvasRenderingContext2D, state: RingTossState, aim: { x: num
   ctx.font = canvasFont('body', 'bold');
   ctx.textAlign = 'left';
   ctx.fillText(`Score ${state.score}`, 16, HEIGHT - 20);
-  ctx.textAlign = 'right';
-  ctx.fillText(`Rings ${state.rings}/${RINGS_PER_ROUND}`, WIDTH - 16, HEIGHT - 20);
+  drawRings(ctx, state);
 
   if (state.phase === 'over') {
     ctx.fillStyle = colors.background;
@@ -247,6 +282,34 @@ function draw(ctx: CanvasRenderingContext2D, state: RingTossState, aim: { x: num
     ctx.fillStyle = colors.text;
     ctx.font = canvasFont('body');
     ctx.fillText('Click to play again', WIDTH / 2, HEIGHT / 2 + 40);
+  }
+}
+
+/**
+ * The ring gauge: one pip per ring, turning red with a warning when low. A
+ * ring still to throw is a thick ring; a thrown one is a thin outline.
+ */
+function drawRings(ctx: CanvasRenderingContext2D, state: RingTossState) {
+  const { colors } = theme;
+  const low = isLowRings(state);
+  const radius = 6;
+  const gap = 18;
+  const right = WIDTH - 16;
+  const centreY = HEIGHT - 52 + radius;
+
+  ctx.textAlign = 'right';
+  ctx.font = canvasFont('body', 'bold');
+  ctx.fillStyle = low ? colors.danger : colors.text;
+  ctx.fillText(`${ringsLabel(state)} ${state.rings}/${RINGS_PER_ROUND}`, right, HEIGHT - 20);
+
+  for (let i = 0; i < RINGS_PER_ROUND; i++) {
+    const x = right - (RINGS_PER_ROUND - i) * gap + gap - radius;
+    const left = i < state.rings;
+    ctx.strokeStyle = left ? (low ? colors.danger : colors.accent) : colors.surface;
+    ctx.lineWidth = left ? 4 : 1.5;
+    ctx.beginPath();
+    ctx.arc(x, centreY, radius, 0, Math.PI * 2);
+    ctx.stroke();
   }
 }
 
@@ -278,7 +341,7 @@ export const ringToss: CarnivalGame = {
       if (state.phase === 'over') {
         state = createState();
         scoreRecorded = false;
-      } else {
+      } else if (state.phase === 'playing') {
         throwRing(state, aim.x, aim.y);
       }
     };
@@ -292,7 +355,9 @@ export const ringToss: CarnivalGame = {
       const dt = Math.min((time - last) / 1000, 0.05);
       last = time;
       step(state, dt);
-      if (state.phase === 'over' && !scoreRecorded) {
+      // Save as soon as the round is complete, not when the overlay shows, so
+      // leaving during the last result still keeps the score.
+      if (isRoundComplete(state) && !scoreRecorded) {
         recordScore(ringToss.id, state.score);
         scoreRecorded = true;
       }
