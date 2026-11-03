@@ -17,6 +17,12 @@ export const DIP_TIME = 0.4;
 export const CAST_TIME = 0.8;
 /** A duck is caught when its centre is this close to the hook as it dips. */
 export const CATCH_RADIUS = 24;
+/** Seconds a catch or a miss stays on screen. The round ends only after the last one. */
+export const CATCH_TIME = 1.2;
+/** Casts count as low, and the gauge turns red with a warning, at this many or fewer. */
+export const LOW_CASTS = 3;
+/** The numbers a duck can carry, lowest first, for the payout legend. */
+export const PAYOUTS = [...new Set(DUCK_NUMBERS)].sort((a, b) => a - b);
 
 const TURN = Math.PI * 2;
 
@@ -93,6 +99,31 @@ export function duckUnderHook(state: HookADuckState): number | null {
   return best;
 }
 
+/** Whether the last catch or miss is still on screen. */
+export function isCatchShowing(state: HookADuckState): boolean {
+  return state.lastCatch !== null && state.lastCatch.age < CATCH_TIME;
+}
+
+export function isLowOnCasts(state: HookADuckState): boolean {
+  return state.casts <= LOW_CASTS;
+}
+
+export interface CastGauge {
+  /** The words before the count: changes when casts are low and when they run out. */
+  label: 'Casts' | 'Low casts!' | 'Out of casts!';
+  low: boolean;
+  /** One per cast in a round, true while that cast is still to make. */
+  pips: boolean[];
+}
+
+/** What the cast gauge shows: a label, and one pip per cast in the round. */
+export function castGauge(state: HookADuckState): CastGauge {
+  const low = isLowOnCasts(state);
+  const label = state.casts === 0 ? 'Out of casts!' : low ? 'Low casts!' : 'Casts';
+  const pips = Array.from({ length: CASTS_PER_ROUND }, (_, i) => i < state.casts);
+  return { label, low, pips };
+}
+
 /** Moves the ducks `dt` seconds round the loop. */
 export function moveDucks(state: HookADuckState, dt: number): void {
   state.offset = wrapAngle(state.offset + DUCK_SPEED * dt);
@@ -136,6 +167,8 @@ export function step(state: HookADuckState, dt: number): void {
       const before = DIP_TIME - cast.age;
       moveDucks(state, before);
       resolveCast(state);
+      // The catch has been on screen for the rest of this step.
+      if (state.lastCatch) state.lastCatch.age = dt - before;
       moveDucks(state, dt - before);
     } else {
       moveDucks(state, dt);
@@ -145,7 +178,29 @@ export function step(state: HookADuckState, dt: number): void {
   } else {
     moveDucks(state, dt);
   }
-  if (state.casts === 0 && !state.cast) state.phase = 'over';
+  // The round ends once the last cast is back up and its catch or miss has
+  // had its full time on screen, so the final overlay never covers it.
+  if (state.casts === 0 && !state.cast && !isCatchShowing(state)) state.phase = 'over';
+}
+
+/** Whether every cast is made and back up, so the score can't change any more. */
+export function isRoundComplete(state: HookADuckState): boolean {
+  return state.casts === 0 && !state.cast;
+}
+
+/**
+ * Returns a function that records the round's score once, the first time it
+ * sees the round complete. That is as soon as the last cast is back up, not
+ * when the game over screen shows, so leaving during the final catch or miss
+ * still saves the score.
+ */
+export function scoreRecorder(record: (score: number) => void): (state: HookADuckState) => void {
+  let recorded = false;
+  return (state) => {
+    if (recorded || !isRoundComplete(state)) return;
+    record(state.score);
+    recorded = true;
+  };
 }
 
 /** How far the hook has dropped, from 0 (up) to 1 (in the water). */
@@ -242,16 +297,26 @@ function draw(ctx: CanvasRenderingContext2D, state: HookADuckState) {
     ctx.setLineDash([]);
   }
 
+  // What each duck can pay, without saying which duck carries which number.
+  ctx.fillStyle = colors.text;
+  ctx.textAlign = 'left';
+  ctx.font = canvasFont('small', 'bold');
+  ctx.fillText('Duck payouts', 12, 62);
+  ctx.fillStyle = colors.accent;
+  ctx.fillText(`${PAYOUTS.join(' · ')} pts`, 12, 82);
+
   // The caught duck's base number, or a miss.
   const caught = state.lastCatch;
-  if (caught && caught.age < 1.2) {
+  if (caught && isCatchShowing(state)) {
     const y = HOOK.y - 140 - caught.age * 20;
-    ctx.globalAlpha = Math.min(1, 2 * (1 - caught.age / 1.2));
+    ctx.globalAlpha = Math.min(1, 2 * (1 - caught.age / CATCH_TIME));
     ctx.textAlign = 'center';
     if (caught.duck === null) {
       ctx.fillStyle = colors.danger;
       ctx.font = canvasFont('title', 'bold');
       ctx.fillText('Miss', HOOK.x, y);
+      ctx.font = canvasFont('body', 'bold');
+      ctx.fillText('+0 pts', HOOK.x, y + 36);
     } else {
       ctx.fillStyle = colors.text;
       ctx.beginPath();
@@ -262,7 +327,7 @@ function draw(ctx: CanvasRenderingContext2D, state: HookADuckState) {
       ctx.fillText(`${caught.points}`, HOOK.x, y);
       ctx.fillStyle = colors.accent;
       ctx.font = canvasFont('body', 'bold');
-      ctx.fillText(`+${caught.points}`, HOOK.x, y + 36);
+      ctx.fillText(`+${caught.points} pts`, HOOK.x, y + 36);
     }
     ctx.globalAlpha = 1;
   }
@@ -271,8 +336,7 @@ function draw(ctx: CanvasRenderingContext2D, state: HookADuckState) {
   ctx.font = canvasFont('body', 'bold');
   ctx.textAlign = 'left';
   ctx.fillText(`Score ${state.score}`, 16, HEIGHT - 20);
-  ctx.textAlign = 'center';
-  ctx.fillText(`Casts ${state.casts}/${CASTS_PER_ROUND}`, WIDTH / 2, HEIGHT - 20);
+  drawCasts(ctx, state);
 
   if (state.phase === 'over') {
     ctx.fillStyle = colors.background;
@@ -289,6 +353,34 @@ function draw(ctx: CanvasRenderingContext2D, state: HookADuckState) {
   }
 }
 
+/** The cast gauge: one pip per cast, filled while unused, red with a warning when low. */
+function drawCasts(ctx: CanvasRenderingContext2D, state: HookADuckState) {
+  const { colors } = theme;
+  const gauge = castGauge(state);
+  const pip = 10;
+  const gap = 4;
+  const left = WIDTH / 2 - (CASTS_PER_ROUND * (pip + gap) - gap) / 2;
+  const top = HEIGHT - 58;
+
+  ctx.textAlign = 'center';
+  ctx.font = canvasFont('body', 'bold');
+  ctx.fillStyle = gauge.low ? colors.danger : colors.text;
+  ctx.fillText(`${gauge.label} ${state.casts}/${CASTS_PER_ROUND}`, WIDTH / 2, HEIGHT - 20);
+
+  // Unused casts are filled; used ones are just an outline, so the gauge reads without colour.
+  ctx.lineWidth = 2;
+  gauge.pips.forEach((full, i) => {
+    const x = left + i * (pip + gap);
+    if (full) {
+      ctx.fillStyle = gauge.low ? colors.danger : colors.water;
+      ctx.fillRect(x, top, pip, 14);
+    } else {
+      ctx.strokeStyle = colors.border;
+      ctx.strokeRect(x + 1, top + 1, pip - 2, 12);
+    }
+  });
+}
+
 export const hookADuck: CarnivalGame = {
   id: 'hook-a-duck',
   name: 'Hook a Duck',
@@ -301,13 +393,14 @@ export const hookADuck: CarnivalGame = {
     canvas.width = WIDTH;
     canvas.height = HEIGHT;
 
+    const newRecorder = () => scoreRecorder((score) => recordScore(hookADuck.id, score));
     let state = createState();
-    let scoreRecorded = false;
+    let saveScore = newRecorder();
 
     const act = () => {
       if (state.phase === 'over') {
         state = createState();
-        scoreRecorded = false;
+        saveScore = newRecorder();
       } else {
         castHook(state);
       }
@@ -328,10 +421,7 @@ export const hookADuck: CarnivalGame = {
       const dt = Math.min((time - last) / 1000, 0.05);
       last = time;
       step(state, dt);
-      if (state.phase === 'over' && !scoreRecorded) {
-        recordScore(hookADuck.id, state.score);
-        scoreRecorded = true;
-      }
+      saveScore(state);
       draw(ctx, state);
       frame = requestAnimationFrame(loop);
     };
@@ -339,6 +429,7 @@ export const hookADuck: CarnivalGame = {
 
     return () => {
       cancelAnimationFrame(frame);
+      saveScore(state);
       canvas.removeEventListener('pointerdown', onDown);
       window.removeEventListener('keydown', onKey);
     };
