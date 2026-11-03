@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import {
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { recordScore, theme } from '../../carnival';
+import whackAMole, {
   END_SPAWN_INTERVAL,
   FEEDBACK_TIME,
   LOW_TIME,
@@ -21,6 +22,11 @@ import {
   timeReadout,
   whack,
 } from './game';
+
+vi.mock('../../carnival', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../carnival')>()),
+  recordScore: vi.fn(),
+}));
 
 /** Always picks the first empty hole. */
 const first = () => 0;
@@ -384,6 +390,87 @@ describe('whack-a-mole', () => {
         total: ROUND_DURATION,
         fraction: 0,
       });
+    });
+  });
+
+  describe('score reporting from start', () => {
+    let frames: ((time: number) => void)[];
+    let onDown: (event: { clientX: number; clientY: number }) => void;
+    let stop: () => void;
+
+    /** Runs the animation frame the game asked for, at `ms` milliseconds. */
+    const frame = (ms: number) => frames.splice(0).forEach((loop) => loop(ms));
+    const click = (hole: number) => onDown({ clientX: HOLES[hole].x, clientY: HOLES[hole].y });
+
+    beforeEach(() => {
+      frames = [];
+      vi.mocked(recordScore).mockClear();
+      // Moles pop up in the last empty hole, so clicks on hole 0 miss.
+      vi.spyOn(Math, 'random').mockReturnValue(0.99);
+      vi.stubGlobal('requestAnimationFrame', (loop: (time: number) => void) => frames.push(loop));
+      vi.stubGlobal('cancelAnimationFrame', () => {
+        frames = [];
+      });
+      vi.stubGlobal('document', {
+        hidden: false,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      });
+      // A 2D context whose drawing calls do nothing.
+      const ctx = new Proxy({}, { get: () => () => {} });
+      const canvas = {
+        getContext: () => ctx,
+        getBoundingClientRect: () => ({
+          left: 0,
+          top: 0,
+          width: theme.canvas.width,
+          height: theme.canvas.height,
+        }),
+        addEventListener: (_type: string, listener: typeof onDown) => {
+          onDown = listener;
+        },
+        removeEventListener: () => {},
+      };
+      stop = whackAMole.start(canvas as unknown as HTMLCanvasElement);
+      frame(0);
+    });
+
+    afterEach(() => {
+      stop();
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    });
+
+    it('saves a finished round once, even when the player leaves while the last feedback fades', () => {
+      frame((ROUND_DURATION - 0.1) * 1000);
+      click(0);
+      frame(ROUND_DURATION * 1000);
+      expect(recordScore).toHaveBeenCalledTimes(1);
+      expect(recordScore).toHaveBeenCalledWith('whack-a-mole', 0);
+
+      stop();
+      expect(recordScore).toHaveBeenCalledTimes(1);
+    });
+
+    it('saves once when the fade ends and the round is over, then again for the replay', () => {
+      frame((ROUND_DURATION - 0.1) * 1000);
+      click(0);
+      frame(ROUND_DURATION * 1000);
+      frame((ROUND_DURATION + FEEDBACK_TIME + 0.1) * 1000);
+      frame((ROUND_DURATION + 2) * 1000);
+      expect(recordScore).toHaveBeenCalledTimes(1);
+
+      click(0);
+      frame((ROUND_DURATION + 3) * 1000);
+      expect(recordScore).toHaveBeenCalledTimes(1);
+      frame((2 * ROUND_DURATION + 3) * 1000);
+      expect(recordScore).toHaveBeenCalledTimes(2);
+    });
+
+    it('saves nothing for a round left before time is up', () => {
+      frame((ROUND_DURATION - 0.1) * 1000);
+      stop();
+      expect(recordScore).not.toHaveBeenCalled();
     });
   });
 });

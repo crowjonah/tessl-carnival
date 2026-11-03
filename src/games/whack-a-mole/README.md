@@ -38,7 +38,9 @@ Scoring and pop-ups stop at exactly 30 seconds. If your last whack lands just
 before then, its `+10` finishes fading before the game over screen appears,
 but the round gets no extra playing time.
 
-Your final score is saved to the carnival's score board when the round ends.
+Your final score is saved to the carnival's score board once, at exactly 30
+seconds, so it counts even if you leave while the last feedback fades. A round
+you leave before time is up is not saved.
 
 ## Files
 

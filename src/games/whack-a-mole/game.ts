@@ -369,7 +369,9 @@ export const whackAMole: CarnivalGame = {
     const loop = (time: number) => {
       step(state, frameSeconds(last, time));
       last = time;
-      if (state.phase === 'over' && !scoreRecorded) {
+      // The score is final once the scoring window closes, so it is saved then,
+      // before the last feedback fades, in case the player leaves during it.
+      if (state.phase !== 'playing' && !scoreRecorded) {
         recordScore(whackAMole.id, state.score);
         scoreRecorded = true;
       }
