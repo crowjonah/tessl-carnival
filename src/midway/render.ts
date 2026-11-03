@@ -1,5 +1,24 @@
 import { canvasFont, theme } from '../carnival';
 import bannerUrl from './aidevcon-banner.png';
+import {
+  crossSections,
+  facePoint,
+  islandBounds,
+  islandFaces,
+  ISLAND_LIP,
+  ISLAND_MARGIN,
+  lipTrees,
+  PIPE_RUN_DEPTH,
+  pipeRoute,
+  placeRelics,
+  roots,
+  type Face,
+  type Faces,
+  type PipeRoute,
+  type Relic,
+  type Section,
+  type Strand,
+} from './cutaway';
 import { palette } from './palette';
 import {
   contours,
@@ -253,23 +272,18 @@ function rectPoints(r: Rect, lift = 0): Pt[] {
   ];
 }
 
-/** The world-pixel box the pre-drawn ground layer covers. */
+/**
+ * The world-pixel box the pre-drawn ground layer covers: the whole island,
+ * its cross-section and roots, and the trees along its back.
+ */
 export function groundBounds(map: MidwayMap): Box {
+  const island = islandBounds(map);
   return {
-    left: -map.height * 16 - 64,
-    right: map.width * 16 + 64,
-    top: -64,
-    // Room under the front edge for the terraces' risers and their shadows.
-    bottom: (map.width + map.height) * 8 + TERRACE_RISE + 12,
+    left: island.left - 16,
+    right: island.right + 16,
+    top: Math.min(island.top - 16, -64),
+    bottom: island.bottom + 4,
   };
-}
-
-/** The open field round the midway, filling the view from the horizon down. */
-export function drawField(ctx: Ctx, view: Box) {
-  ctx.fillStyle = palette.haze;
-  ctx.fillRect(view.left, HORIZON, view.right - view.left, 6);
-  ctx.fillStyle = palette.grass;
-  ctx.fillRect(view.left, HORIZON + 6, view.right - view.left, Math.max(0, view.bottom - HORIZON));
 }
 
 /**
@@ -285,8 +299,9 @@ export interface GroundLayer {
 }
 
 /**
- * Draws the parts of the ground that never change (the grass, contour lines,
- * paths, trees and the hedge's back two sides) once, onto an off-screen canvas covering
+ * Draws the parts of the ground that never change (the terraces, the
+ * cross-section under them, contour lines, paths, trees and the hedge's back
+ * two sides) once, onto an off-screen canvas covering
  * groundBounds(map). It uses `scale` device pixels per world pixel, or less
  * when that would make the canvas too big, so its size stays bounded however
  * long the midway grows.
@@ -301,8 +316,10 @@ export function drawGroundLayer(map: MidwayMap, wanted: number): GroundLayer {
   const ctx = canvas.getContext('2d')!;
   ctx.setTransform(scale, 0, 0, scale, -bounds.left * scale, -bounds.top * scale);
 
-  // The terrain as stacked terraces, printed with stipple, ruled with contours.
+  // The terrain as stacked terraces, cut away along the front to show the
+  // earth under it, printed with stipple and ruled with contours.
   drawTerraces(ctx, map);
+  drawCutaway(ctx, map);
   drawStipple(ctx, map);
   drawContours(ctx, map);
 
@@ -311,15 +328,354 @@ export function drawGroundLayer(map: MidwayMap, wanted: number): GroundLayer {
   for (const path of map.paths) poly(ctx, rectPoints(grow(path, 0.08)), palette.pathCasing);
   for (const path of map.paths) poly(ctx, rectPoints(path), palette.path);
   for (const slot of map.booths) boothPad(ctx, slot);
+  const pipe = pipeRoute(map);
+  if (pipe) waterMain(ctx, pipe);
   pathName(ctx, map);
 
   // Trees out in the field behind the midway.
-  for (let i = 0; i < map.width; i += 2) tree(ctx, i + 0.5 + hash(i, 1) * 0.6, -1.4 - hash(i, 2));
-  for (let i = 2; i < map.height; i += 2) tree(ctx, -1.4 - hash(1, i), i + 0.5 + hash(2, i) * 0.6);
+  for (let i = 0; i < map.width; i += 2)
+    drawTree(ctx, i + 0.5 + hash(i, 1) * 0.6, -1.4 - hash(i, 2));
+  for (let i = 2; i < map.height; i += 2)
+    drawTree(ctx, -1.4 - hash(1, i), i + 0.5 + hash(2, i) * 0.6);
 
   hedge(ctx, { x: 0, y: 0, w: map.width, h: 1 });
   hedge(ctx, { x: 0, y: 0, w: 1, h: map.height });
   return { canvas, scale };
+}
+
+// ── The cutaway ───────────────────────────────────────────────────────────
+
+/** A point `depth` pixels below the surface, `s` tiles along a face. */
+function onFace(face: Face, s: number, depth: number): Pt {
+  const p = facePoint(face, s);
+  const [x, y] = at(p.x, p.y);
+  return [x, y + depth];
+}
+
+/**
+ * Draws in the plane of a face, centred `depth` pixels below the surface
+ * `s` tiles along it, so relics lie flat in the rock. Local x runs along
+ * the face left to right on screen, local y down.
+ */
+function onFacePlane(
+  ctx: Ctx,
+  side: keyof Faces,
+  face: Face,
+  s: number,
+  depth: number,
+  paint: () => void,
+) {
+  const [x, y] = onFace(face, s, depth);
+  ctx.save();
+  ctx.transform(0.894, side === 'left' ? 0.447 : -0.447, 0, 1, x, y);
+  paint();
+  ctx.restore();
+}
+
+/** Cross-sections, computed once per map, since the terrain never changes. */
+const sectionCache = new WeakMap<MidwayMap, { left: Section; right: Section }>();
+
+function sectionsFor(map: MidwayMap) {
+  let sections = sectionCache.get(map);
+  if (!sections) {
+    sections = crossSections(map, fieldFor(map));
+    sectionCache.set(map, sections);
+  }
+  return sections;
+}
+
+/** Traces a line along a face through a profile of depths. */
+function traceProfile(
+  ctx: Ctx,
+  face: Face,
+  stations: readonly number[],
+  depths: readonly number[],
+  reverse = false,
+) {
+  for (let n = 0; n < stations.length; n++) {
+    const i = reverse ? stations.length - 1 - n : n;
+    const [x, y] = onFace(face, stations[i], depths[i]);
+    if (n === 0 && !reverse) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+}
+
+/**
+ * The island's two front faces as a printed cross-section: strata in tints
+ * of the map's inks, ruled between, a halftone over every other band, and a
+ * ragged underside in dark ink. Then the roots, the Water Cannon's plumbing
+ * and the buried relics, all drawn once into the ground layer.
+ */
+function drawCutaway(ctx: Ctx, map: MidwayMap) {
+  const faces = islandFaces(map);
+  const sections = sectionsFor(map);
+  const dots = halftone(ctx);
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  // A restrained halftone shadow just under the underside, so the island floats.
+  if (dots) {
+    for (const side of ['left', 'right'] as const) {
+      const { stations, underside } = sections[side];
+      ctx.beginPath();
+      traceProfile(ctx, faces[side], stations, underside);
+      traceProfile(
+        ctx,
+        faces[side],
+        stations,
+        underside.map((d) => d + 7),
+        true,
+      );
+      ctx.closePath();
+      ctx.fillStyle = dots;
+      ctx.fill();
+    }
+  }
+  for (const side of ['left', 'right'] as const) {
+    const face = faces[side];
+    const { stations, strata, underside } = sections[side];
+    strata.forEach((tops, k) => {
+      ctx.beginPath();
+      traceProfile(ctx, face, stations, tops);
+      traceProfile(ctx, face, stations, underside, true);
+      ctx.closePath();
+      ctx.fillStyle = palette.strata[k % palette.strata.length];
+      ctx.fill();
+      if (dots && k % 2 === 0 && k > 0) {
+        ctx.fillStyle = dots;
+        ctx.fill();
+      }
+    });
+    pebbles(ctx, face, sections[side]);
+    // The face turned from the light gets a cyan wash, so the corner reads.
+    if (side === 'right') {
+      ctx.beginPath();
+      traceProfile(ctx, face, stations, strata[0]);
+      traceProfile(ctx, face, stations, underside, true);
+      ctx.closePath();
+      ctx.fillStyle = palette.faceShade;
+      ctx.fill();
+    }
+    ctx.strokeStyle = palette.strataLine;
+    ctx.lineWidth = 0.6;
+    for (const tops of strata.slice(1)) {
+      ctx.beginPath();
+      traceProfile(ctx, face, stations, tops);
+      ctx.stroke();
+    }
+  }
+
+  const pipe = pipeRoute(map);
+  const trees = lipTrees(map);
+  for (const tree of trees) {
+    const near = Math.min(tree.s, faces[tree.side].length - tree.s);
+    const reach = near < 8 ? 1 : 0.7;
+    for (const strand of roots(
+      tree.s,
+      reach,
+      faces[tree.side].length,
+      Math.round(tree.x * 7 + tree.y),
+    ))
+      root(ctx, faces[tree.side], strand);
+  }
+  // Fine rootlets from the grass, all along the topsoil.
+  for (const side of ['left', 'right'] as const) {
+    const { length } = faces[side];
+    for (let s = 0.8; s < length - 0.5; s += 1.3) {
+      const seed = Math.round(s * 10) + (side === 'left' ? 0 : 500);
+      const strand = roots(s + hash(seed, 3) * 0.5, 0.12, length, seed)[0];
+      root(ctx, faces[side], { ...strand, width: 0.6 });
+    }
+  }
+  if (pipe) plumbing(ctx, faces[pipe.side], pipe);
+
+  const avoid = { left: [] as number[], right: [] as number[] };
+  for (const tree of trees) avoid[tree.side].push(tree.s);
+  if (pipe) avoid[pipe.side].push(pipe.s, pipe.tank);
+  for (const relic of placeRelics(faces, avoid)) buriedRelic(ctx, faces[relic.side], relic);
+
+  // The faces' outline: the corner, the far ends and the ragged underside.
+  ctx.strokeStyle = palette.ink;
+  ctx.lineWidth = 1.1;
+  for (const side of ['left', 'right'] as const) {
+    const face = faces[side];
+    const { stations, underside } = sections[side];
+    const end = stations.length - 1;
+    ctx.beginPath();
+    const top = onFace(face, stations[end], 0);
+    ctx.moveTo(top[0], top[1]);
+    traceProfile(ctx, face, stations, underside, true);
+    const corner = onFace(face, 0, 0);
+    ctx.lineTo(corner[0], corner[1]);
+    ctx.stroke();
+  }
+}
+
+/** Small stones in the rock strata, set where the hash says, never crossing a boundary. */
+function pebbles(ctx: Ctx, face: Face, { stations, strata, underside }: Section) {
+  ctx.lineWidth = 0.5;
+  ctx.strokeStyle = palette.strataLine;
+  for (let i = 2; i < stations.length - 2; i += 3) {
+    for (let k = 2; k < strata.length; k++) {
+      if (hash(i, k, 21) > 0.22) continue;
+      const top = strata[k][i];
+      const bottom = k + 1 < strata.length ? strata[k + 1][i] : underside[i];
+      if (bottom - top < 7) continue;
+      const [x, y] = onFace(face, stations[i], lerp(top + 3, bottom - 3, hash(i, k, 22)));
+      ctx.fillStyle = palette.strata[(k + 2) % palette.strata.length];
+      ctx.beginPath();
+      ctx.ellipse(x, y, 1.6 + hash(i, k, 23) * 1.4, 1 + hash(i, k, 24), 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+}
+
+function root(ctx: Ctx, face: Face, { points, width }: Strand) {
+  const line = points.map(([s, depth]) => onFace(face, s, depth));
+  stroke(ctx, line, palette.root, width);
+  if (width > 1.2) stroke(ctx, line.slice(0, 3), palette.rootLight, width * 0.3);
+}
+
+/**
+ * The Water Cannon's plumbing in section: the main drops from the surface,
+ * where it comes out from under the booth, to a cistern along the face,
+ * with a valve wheel on the way.
+ */
+function plumbing(ctx: Ctx, face: Face, pipe: PipeRoute) {
+  const depth = PIPE_RUN_DEPTH;
+  const run = [
+    onFace(face, pipe.s, -1),
+    onFace(face, pipe.s, depth),
+    onFace(face, pipe.tank, depth),
+  ];
+  stroke(ctx, run, palette.ink, 4.4);
+  stroke(ctx, run, palette.pipe, 3);
+  stroke(ctx, run, palette.pipeLight, 0.8);
+  // Collars at the joints.
+  for (const [x, y] of run.slice(1)) oval(ctx, x, y, 2.6, 2.6, palette.pipe);
+  const valve = onFace(face, pipe.s, depth * 0.45);
+  ctx.strokeStyle = palette.red;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.arc(valve[0] - 4, valve[1], 2.6, 0, Math.PI * 2);
+  ctx.moveTo(valve[0] - 1.4, valve[1]);
+  ctx.lineTo(valve[0], valve[1]);
+  ctx.stroke();
+
+  // The cistern, half full, in the face's plane.
+  onFacePlane(ctx, pipe.side, face, pipe.tank, depth + 4, () => {
+    ctx.fillStyle = palette.ink;
+    ctx.beginPath();
+    ctx.roundRect(-12, -12, 24, 22, 5);
+    ctx.fill();
+    ctx.fillStyle = palette.metal;
+    ctx.beginPath();
+    ctx.roundRect(-10.8, -10.8, 21.6, 19.6, 4);
+    ctx.fill();
+    ctx.fillStyle = palette.water;
+    ctx.beginPath();
+    ctx.roundRect(-10.8, -2, 21.6, 10.8, [0, 0, 4, 4]);
+    ctx.fill();
+    ctx.strokeStyle = palette.pipeLight;
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    for (let x = -9; x < 9; x += 4) {
+      ctx.moveTo(x, -0.5);
+      ctx.quadraticCurveTo(x + 1, -1.5, x + 2, -0.5);
+    }
+    ctx.stroke();
+    for (const x of [-6, 0, 6]) {
+      ctx.fillStyle = palette.ink;
+      ctx.fillRect(x - 0.3, -10.8, 0.6, 19.6);
+    }
+  });
+}
+
+/** One buried relic, in a pale hollow in the face's plane. */
+function buriedRelic(ctx: Ctx, face: Face, relic: Relic) {
+  onFacePlane(ctx, relic.side, face, relic.s, relic.depth, () => {
+    ctx.fillStyle = palette.hollow;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 13, 7.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = palette.strataLine;
+    ctx.lineWidth = 0.6;
+    ctx.stroke();
+    if (relic.kind === 'ring') {
+      // An old toss ring, lying a little tilted.
+      ctx.lineWidth = 2.6;
+      ctx.strokeStyle = palette.ink;
+      ctx.beginPath();
+      ctx.ellipse(0, 0.5, 8, 4, -0.15, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.lineWidth = 1.6;
+      ctx.strokeStyle = palette.red;
+      ctx.stroke();
+    } else if (relic.kind === 'ticket-roll') {
+      // A roll of tickets, its tail of stubs trailing off.
+      ctx.fillStyle = palette.ink;
+      for (let i = 0; i < 4; i++) ctx.fillRect(1 + i * 3.2, 1.8, 2.6, 2.8);
+      ctx.fillStyle = palette.gold;
+      for (let i = 0; i < 4; i++) ctx.fillRect(1.4 + i * 3.2, 2.2, 1.8, 2);
+      oval(ctx, -3.5, 0, 5.4, 5.4, palette.ink);
+      oval(ctx, -3.5, 0, 4.6, 4.6, palette.gold);
+      oval(ctx, -3.5, 0, 2.6, 2.6, palette.red);
+      oval(ctx, -3.5, 0, 1.1, 1.1, palette.ink);
+    } else {
+      // A broken piece of an old booth sign, lettered in the atlas face.
+      ctx.rotate(-0.12);
+      ctx.fillStyle = palette.ink;
+      ctx.beginPath();
+      ctx.moveTo(-11, -4.6);
+      ctx.lineTo(9, -4.6);
+      ctx.lineTo(11, -1);
+      ctx.lineTo(8, 1.2);
+      ctx.lineTo(10, 4.6);
+      ctx.lineTo(-11, 4.6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = palette.cream;
+      ctx.beginPath();
+      ctx.moveTo(-10, -3.6);
+      ctx.lineTo(8.4, -3.6);
+      ctx.lineTo(9.8, -1);
+      ctx.lineTo(7, 1.2);
+      ctx.lineTo(8.6, 3.6);
+      ctx.lineTo(-10, 3.6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.font = `bold 6px ${theme.font.display}`;
+      ctx.letterSpacing = '0.5px';
+      ctx.fillStyle = palette.red;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('NIVAL', -1, 0.4);
+      ctx.letterSpacing = '0px';
+    }
+  });
+}
+
+/** The buried water main on the surface, from the Water Cannon's pad to the cliff edge. */
+function waterMain(ctx: Ctx, pipe: PipeRoute) {
+  const line = [at(pipe.from.x, pipe.from.y), at(pipe.to.x, pipe.to.y)];
+  ctx.setLineDash([3, 2.5]);
+  stroke(ctx, line, palette.pipe, 1.4);
+  ctx.setLineDash([]);
+  // A cover over the main where it leaves the pad.
+  const [x, y] = line[0];
+  oval(ctx, x, y + 2, 3.6, 1.8, palette.ink);
+  oval(ctx, x, y + 2, 2.8, 1.3, palette.pipeLight);
+}
+
+/** A tree on the cliff's lip, whose roots show in the cross-section below it. */
+export function drawLipTree(ctx: Ctx, tree: Point) {
+  drawTree(ctx, tree.x, tree.y);
+}
+
+/** The screen box a lip tree covers, for fading it in front of the player. */
+export function lipTreeBounds(tree: Point): Box {
+  const [x, y] = at(tree.x, tree.y);
+  return { left: x - 14, right: x + 16, top: y - 32, bottom: y + 6 };
 }
 
 function grow(r: Rect, by: number): Rect {
@@ -332,8 +688,6 @@ function fieldFor(map: MidwayMap) {
   return (x: number, y: number) => elevation(hills, x, y, 0.12);
 }
 
-/** How far the terraces reach past the back hedge, under the trees, in tiles. */
-const TERRACE_MARGIN = 2;
 /** The height of each terrace's riser, in world pixels. */
 export const TERRACE_RISE = 4;
 
@@ -347,8 +701,9 @@ const stippleCache = new WeakMap<MidwayMap, [number, number][]>();
 function terracesFor(map: MidwayMap): Terrace[] {
   let steps = terraceCache.get(map);
   if (!steps) {
-    const m = TERRACE_MARGIN;
-    steps = terraces(fieldFor(map), -m, -m, map.width, map.height);
+    const m = ISLAND_MARGIN;
+    const lip = ISLAND_LIP;
+    steps = terraces(fieldFor(map), -m, -m, map.width + lip, map.height + lip);
     terraceCache.set(map, steps);
   }
   return steps;
@@ -375,9 +730,14 @@ function tracePolygons(ctx: Ctx, cells: readonly Polygon[], lift: number) {
  */
 function drawTerraces(ctx: Ctx, map: MidwayMap) {
   const steps = terracesFor(map);
-  const m = TERRACE_MARGIN;
+  const m = ISLAND_MARGIN;
+  const lip = ISLAND_LIP;
   const tints = palette.terraces;
-  poly(ctx, rectPoints({ x: -m, y: -m, w: map.width + m, h: map.height + m }), tints[0]);
+  poly(
+    ctx,
+    rectPoints({ x: -m, y: -m, w: map.width + m + lip, h: map.height + m + lip }),
+    tints[0],
+  );
   if (steps.length === 0) return;
   const lowest = steps[0].level;
   const highest = steps[steps.length - 1].level;
@@ -504,7 +864,7 @@ function pathName(ctx: Ctx, map: MidwayMap) {
   ctx.restore();
 }
 
-function tree(ctx: Ctx, x: number, y: number) {
+function drawTree(ctx: Ctx, x: number, y: number) {
   const [px, py] = at(x, y);
   oval(ctx, px + 4, py + 1, 12, 5, palette.shadow);
   poly(
